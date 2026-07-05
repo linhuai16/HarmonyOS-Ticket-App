@@ -1,0 +1,15 @@
+{
+  "module": {
+    "name": "module_city_select",
+    "type": "har",
+    "deviceTypes": [
+      "phone",
+    ],
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.APPROXIMATELY_LOCATION",
+        "reason": "$string:apply_location_reason",
+      }
+    ]
+  }
+}
