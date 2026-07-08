@@ -1,0 +1,11 @@
+{
+  "modelVersion": "6.1.0",
+  "description": "Please describe the basic information.",
+  "dependencies": {
+    "module_city_select": "file:./module_city_select"
+  },
+  "devDependencies": {
+    "@ohos/hypium": "1.0.25",
+    "@ohos/hamock": "1.0.0"
+  }
+}

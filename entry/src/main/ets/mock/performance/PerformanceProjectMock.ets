@@ -1,0 +1,117 @@
+import { PerformanceProject } from '../../model/entity/PerformanceProject'
+import { ProjectStatus } from '../../model/enums/ProjectStatus'
+
+export const performanceProjectMockList: PerformanceProject[] = [
+  {
+    projectId: 'proj_1001',
+    title: '周杰伦「嘉年华」世界巡回演唱会',
+    categoryId: 'cat_concert',
+    posterUrl: 'yanchanghui_ZhouJieLunYanchu',
+    detailContent: '本场演出为大型巡回演唱会，包含经典歌曲、舞美灯光与沉浸式互动。',
+    minPrice: 580,
+    maxPrice: 1980,
+    wantCount: 98231,
+    hotScore: 98,
+    projectStatus: ProjectStatus.ON_SALE,
+    recommendFlag: true,
+    publishTime: '2026-05-01 10:00:00'
+  },
+  {
+    projectId: 'proj_1002',
+    title: '音乐剧《爱乐之城》中文版',
+    categoryId: 'cat_drama',
+    posterUrl: 'huajuYanchu',
+    detailContent: '用音乐和舞蹈讲述梦想与爱情。',
+    minPrice: 180,
+    maxPrice: 1080,
+    wantCount: 35210,
+    hotScore: 91,
+    projectStatus: ProjectStatus.ON_SALE,
+    recommendFlag: true,
+    publishTime: '2026-05-03 09:00:00'
+  },
+  {
+    projectId: 'proj_1003',
+    title: '草莓音乐节 2026',
+    categoryId: 'cat_music_festival',
+    posterUrl: 'YinyuejieYanchu',
+    detailContent: '多舞台、多艺人、户外音乐节。',
+    minPrice: 320,
+    maxPrice: 880,
+    wantCount: 61120,
+    hotScore: 95,
+    projectStatus: ProjectStatus.ON_SALE,
+    recommendFlag: true,
+    publishTime: '2026-05-06 12:00:00'
+  },
+  {
+    projectId: 'proj_1004',
+    title: '喜剧专场《笑到下班》',
+    categoryId: 'cat_talkshow',
+    posterUrl: 'TuokouxiuYanchu',
+    detailContent: '年轻人下班后的快乐解压现场。',
+    minPrice: 99,
+    maxPrice: 399,
+    wantCount: 10987,
+    hotScore: 83,
+    projectStatus: ProjectStatus.ON_SALE,
+    recommendFlag: true,
+    publishTime: '2026-05-08 18:00:00'
+  },
+  {
+    projectId: 'proj_1005',
+    title: '沉浸式戏剧《迷城》',
+    categoryId: 'cat_immersive',
+    posterUrl: 'juchang_MichengYanchu',
+    detailContent: '观众可自由探索剧情空间。',
+    minPrice: 268,
+    maxPrice: 688,
+    wantCount: 22018,
+    hotScore: 88,
+    projectStatus: ProjectStatus.ON_SALE,
+    recommendFlag: true,
+    publishTime: '2026-05-09 10:30:00'
+  },
+  {
+    projectId: 'proj_1006',
+    title: '德云社相声大会',
+    categoryId: 'cat_crosstalk',
+    posterUrl: 'XiangShengYanchu',
+    detailContent: '传统相声与新派包袱结合。',
+    minPrice: 120,
+    maxPrice: 680,
+    wantCount: 17500,
+    hotScore: 84,
+    projectStatus: ProjectStatus.ON_SALE,
+    recommendFlag: true,
+    publishTime: '2026-05-10 08:00:00'
+  },
+  {
+    projectId: 'proj_1007',
+    title: '昆曲《牡丹亭》青春版',
+    categoryId: 'cat_opera',
+    posterUrl: 'xiqu_muDanTingYanchu',
+    detailContent: '经典昆曲名作，东方美学舞台。',
+    minPrice: 100,
+    maxPrice: 580,
+    wantCount: 9030,
+    hotScore: 76,
+    projectStatus: ProjectStatus.COMING_SOON,
+    recommendFlag: false,
+    publishTime: '2026-05-11 08:00:00'
+  },
+  {
+    projectId: 'proj_1008',
+    title: '舞剧《只此青绿》',
+    categoryId: 'cat_dance',
+    posterUrl: 'WujuYanchu',
+    detailContent: '以舞绘画，以身入卷。',
+    minPrice: 280,
+    maxPrice: 1280,
+    wantCount: 43001,
+    hotScore: 93,
+    projectStatus: ProjectStatus.ON_SALE,
+    recommendFlag: true,
+    publishTime: '2026-05-12 08:00:00'
+  }
+]
