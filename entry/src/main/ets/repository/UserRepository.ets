@@ -1,5 +1,4 @@
 import { User } from '../model/entity/User'
-import { userMockList } from '../mock/user/UserMock'
 import { AccountStatus } from '../model/enums/AccountStatus'
 
 import {
@@ -9,7 +8,7 @@ import {
 
 import { UserDataUtil } from '../utils/UserDataUtil'
 import { UserSessionUtil } from '../utils/UserSessionUtil'
-import { IdGenerator } from '../utils/IdGenerator'
+import { ApiClient, ApiQueryParam } from '../network/ApiClient'
 
 export interface SendSmsCodeResponse {
   success: boolean
@@ -26,141 +25,163 @@ export interface UpdateUserProfileResponse {
   user?: MineUserVO
 }
 
-const MOCK_SMS_CODE: string = '123456'
+interface BackendMineUserVO {
+  userId: number | string
+  phone?: string
+  nickname?: string
+  avatarUrl?: string
+  accountStatus?: string
+}
+
+interface BackendMinePageVO {
+  user?: BackendMineUserVO
+  userId?: number | string
+  phone?: string
+  nickname?: string
+  avatarUrl?: string
+  accountStatus?: string
+}
+
+interface BackendLoginResponse {
+  token: string
+  user: BackendMineUserVO
+}
+
+interface BackendUpdateUserProfileResponse {
+  success: boolean
+  message?: string
+  user?: BackendMineUserVO
+}
+
+interface SmsCodeRequestBody {
+  phone: string
+}
+
+interface LoginRequestBody {
+  phone: string
+  smsCode: string
+}
+
+interface UpdateUserProfileRequestBody {
+  nickname: string
+  phone: string
+  avatarUrl: string
+}
 
 /**
  * 用户 Repository。
  *
- * 职责：登录注册、当前用户查询、我的页 VO、用户资料更新。
- * 登录态读写交给 UserSessionUtil；手机号/昵称校验和用户查找交给 UserDataUtil。
+ * 该版本已从 Mock 切换到 SpringBoot：
+ * POST /api/auth/sms-code
+ * POST /api/auth/login
+ * GET  /api/users/me
+ * PUT  /api/users/{userId}/profile
  */
 export class UserRepository {
-  sendSmsCode(phone: string): SendSmsCodeResponse {
-    const result: SendSmsCodeResponse = {
-      success: UserDataUtil.isValidPhone(phone)
+  async sendSmsCode(phone: string): Promise<SendSmsCodeResponse> {
+    const normalizedPhone: string = UserDataUtil.normalizePhone(phone)
+    if (!UserDataUtil.isValidPhone(normalizedPhone)) {
+      return { success: false }
     }
-    return result
+
+    const body: SmsCodeRequestBody = {
+      phone: normalizedPhone
+    }
+    return await ApiClient.post<SendSmsCodeResponse>('/api/auth/sms-code', body)
   }
 
-  login(phone: string, smsCode: string): LoginResponse | undefined {
+  async login(phone: string, smsCode: string): Promise<LoginResponse | undefined> {
     const normalizedPhone: string = UserDataUtil.normalizePhone(phone)
-
-    if (!UserDataUtil.isValidPhone(normalizedPhone)) {
+    if (!UserDataUtil.isValidPhone(normalizedPhone) || smsCode.length === 0) {
       return undefined
     }
 
-    if (smsCode !== MOCK_SMS_CODE) {
-      return undefined
+    const body: LoginRequestBody = {
+      phone: normalizedPhone,
+      smsCode: smsCode
     }
+    const response: BackendLoginResponse = await ApiClient.post<BackendLoginResponse>('/api/auth/login', body)
 
-    let user: User | undefined = UserDataUtil.findUserByPhone(normalizedPhone)
+    const userVO: MineUserVO = this.mapMineUser(response.user)
+    const user: User = this.mapUserEntity(response.user)
+    UserSessionUtil.saveLoginState(user, response.token)
 
-    if (user === undefined) {
-      user = this.createUser(normalizedPhone)
-      userMockList.push(user)
+    return {
+      token: response.token,
+      user: userVO
     }
-
-    if (user.accountStatus === AccountStatus.DISABLED) {
-      return undefined
-    }
-
-    const token: string = IdGenerator.createToken(user.userId)
-    UserSessionUtil.saveLoginState(user, token)
-
-    const result: LoginResponse = {
-      token: token,
-      user: this.buildMineUserVO(user)
-    }
-    return result
   }
 
   logout(): void {
     UserSessionUtil.clearLoginState()
   }
 
-  getMinePage(userId: string = ''): MinePageVO | undefined {
+  async getMinePage(userId: string = ''): Promise<MinePageVO | undefined> {
     const targetUserId: string = this.getEffectiveUserId(userId)
-    const user: User | undefined = UserDataUtil.findUserById(targetUserId)
-
-    if (user === undefined) {
+    if (targetUserId.length === 0) {
       return undefined
     }
 
-    const result: MinePageVO = {
-      user: this.buildMineUserVO(user)
+    const response: BackendMinePageVO = await ApiClient.get<BackendMinePageVO>('/api/users/me', [
+      new ApiQueryParam('userId', targetUserId)
+    ])
+
+    const rawUser: BackendMineUserVO | undefined = response.user ?? this.mapMinePageAsUser(response)
+    if (rawUser === undefined) {
+      return undefined
     }
-    return result
+
+    return {
+      user: this.mapMineUser(rawUser)
+    }
   }
 
   getCurrentUser(): User | undefined {
     const currentUserId: string = UserSessionUtil.getCurrentUserId()
-    return UserDataUtil.findUserById(currentUserId)
+    if (currentUserId.length === 0) {
+      return undefined
+    }
+
+    const nickname: string | undefined = AppStorage.get<string>('login_nickname')
+    const phone: string | undefined = AppStorage.get<string>('login_phone')
+    const avatarUrl: string | undefined = AppStorage.get<string>('login_avatar_url')
+
+    return {
+      userId: currentUserId,
+      phone: phone ?? '',
+      nickname: nickname ?? '',
+      avatarUrl: avatarUrl ?? '',
+      accountStatus: AccountStatus.NORMAL
+    }
   }
 
-  updateUserProfile(userId: string, nickname: string, phone: string, avatarUrl: string): UpdateUserProfileResponse {
+  async updateUserProfile(userId: string, nickname: string, phone: string, avatarUrl: string): Promise<UpdateUserProfileResponse> {
     const targetUserId: string = this.getEffectiveUserId(userId)
     const normalizedNickname: string = UserDataUtil.normalizeNickname(nickname)
     const normalizedPhone: string = UserDataUtil.normalizePhone(phone)
     const normalizedAvatarUrl: string = UserDataUtil.normalizeAvatarUrl(avatarUrl)
 
     if (targetUserId.length === 0 || !this.isLogin()) {
-      return {
-        success: false,
-        message: '用户未登录'
-      }
+      return { success: false, message: '用户未登录' }
     }
 
-    if (normalizedNickname.length === 0) {
-      return {
-        success: false,
-        message: '请输入用户昵称'
-      }
+    const body: UpdateUserProfileRequestBody = {
+      nickname: normalizedNickname,
+      phone: normalizedPhone,
+      avatarUrl: normalizedAvatarUrl
     }
+    const response: BackendUpdateUserProfileResponse =
+      await ApiClient.put<BackendUpdateUserProfileResponse>('/api/users/' + encodeURIComponent(targetUserId) + '/profile', body)
 
-    if (!UserDataUtil.isValidNickname(normalizedNickname)) {
-      return {
-        success: false,
-        message: '用户昵称不能超过12个字符'
-      }
-    }
-
-    if (!UserDataUtil.isValidPhone(normalizedPhone)) {
-      return {
-        success: false,
-        message: '手机号格式不正确'
-      }
-    }
-
-    const user: User | undefined = UserDataUtil.findUserById(targetUserId)
-    if (user === undefined) {
-      return {
-        success: false,
-        message: '用户信息不存在'
-      }
-    }
-
-    if (UserDataUtil.hasDuplicateUserPhone(normalizedPhone, targetUserId)) {
-      return {
-        success: false,
-        message: '该手机号已被其他账号使用'
-      }
-    }
-
-    user.nickname = normalizedNickname
-    user.phone = normalizedPhone
-    user.avatarUrl = normalizedAvatarUrl
-
-    if (targetUserId === UserSessionUtil.getCurrentUserId()) {
-      const token: string = UserSessionUtil.getToken().length > 0 ?
-        UserSessionUtil.getToken() :
-        IdGenerator.createToken(user.userId)
-      UserSessionUtil.saveLoginState(user, token)
+    const userVO: MineUserVO | undefined = response.user === undefined ? undefined : this.mapMineUser(response.user)
+    if (response.success && response.user !== undefined) {
+      UserSessionUtil.saveLoginState(this.mapUserEntity(response.user), UserSessionUtil.getToken())
     }
 
     return {
-      success: true,
-      message: '保存成功',
-      user: this.buildMineUserVO(user)
+      success: response.success,
+      message: response.message ?? (response.success ? '保存成功' : '保存失败'),
+      user: userVO
     }
   }
 
@@ -181,24 +202,36 @@ export class UserRepository {
     return normalizedUserId.length > 0 ? normalizedUserId : UserSessionUtil.getCurrentUserId()
   }
 
-  private createUser(phone: string): User {
-    const user: User = {
-      userId: IdGenerator.createUserId(),
-      phone: phone,
-      nickname: UserDataUtil.buildDefaultNickname(phone),
-      avatarUrl: 'default_avatar',
-      accountStatus: AccountStatus.NORMAL
+  private mapMinePageAsUser(raw: BackendMinePageVO): BackendMineUserVO | undefined {
+    if (raw.userId === undefined) {
+      return undefined
     }
-    return user
+
+    return {
+      userId: raw.userId,
+      phone: raw.phone,
+      nickname: raw.nickname,
+      avatarUrl: raw.avatarUrl,
+      accountStatus: raw.accountStatus
+    }
   }
 
-  private buildMineUserVO(user: User): MineUserVO {
-    const vo: MineUserVO = {
-      userId: user.userId,
-      phone: user.phone,
-      nickname: user.nickname,
-      avatarUrl: user.avatarUrl
+  private mapMineUser(raw: BackendMineUserVO): MineUserVO {
+    return {
+      userId: String(raw.userId),
+      phone: raw.phone ?? '',
+      nickname: raw.nickname ?? '',
+      avatarUrl: raw.avatarUrl ?? ''
     }
-    return vo
+  }
+
+  private mapUserEntity(raw: BackendMineUserVO): User {
+    return {
+      userId: String(raw.userId),
+      phone: raw.phone ?? '',
+      nickname: raw.nickname ?? '',
+      avatarUrl: raw.avatarUrl ?? '',
+      accountStatus: raw.accountStatus === AccountStatus.DISABLED ? AccountStatus.DISABLED : AccountStatus.NORMAL
+    }
   }
 }

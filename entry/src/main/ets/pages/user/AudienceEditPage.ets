@@ -25,6 +25,7 @@ struct AudienceEditPage {
   private lastLoadKey: string = ''
   private isWaitingLoginBack: boolean = false
 
+  @State inputRefreshVersion: number = 0
   @State userId: string = ''
   @State from: string = ''
   @State realName: string = ''
@@ -48,7 +49,7 @@ struct AudienceEditPage {
     }
   }
 
-  private loadPageData(allowLoginRedirect: boolean): void {
+  private async loadPageData(allowLoginRedirect: boolean): Promise<void> {
     const params: AudienceEditRouteParams = this.getRouteParams()
     const userId: string = this.resolveEffectiveUserId(params.userId ?? '')
     const audienceId: string = params.audienceId ?? ''
@@ -70,7 +71,7 @@ struct AudienceEditPage {
     this.from = from
 
     if (audienceId.length > 0) {
-      this.vm.loadDetail(userId, audienceId)
+      await this.vm.loadDetail(userId, audienceId)
       this.isAgreeRule = true
     } else {
       this.vm.resetForm(userId)
@@ -81,6 +82,7 @@ struct AudienceEditPage {
     this.lastLoadKey = loadKey
     this.isWaitingLoginBack = false
     this.syncFromVm()
+    this.refreshInputText()
   }
 
   private getRouteParams(): AudienceEditRouteParams {
@@ -129,6 +131,10 @@ struct AudienceEditPage {
     this.isDefault = this.vm.isDefault
     this.errorMessage = this.vm.errorMessage
     this.canSaveValue = this.vm.canSave() && this.isAgreeRule
+  }
+
+  private refreshInputText(): void {
+    this.inputRefreshVersion++
   }
 
   build() {
@@ -199,22 +205,13 @@ struct AudienceEditPage {
   @Builder
   private FormArea() {
     Column() {
-      this.InputRow('姓名', '请输入姓名', this.realName, (value: string) => {
-        this.vm.realName = value
-        this.syncFromVm()
-      })
+      this.RealNameInputRow()
 
       this.CertificateTypeArea()
 
-      this.InputRow('证件号', '请输入证件号', this.certificateNo, (value: string) => {
-        this.vm.certificateNo = value
-        this.syncFromVm()
-      })
+      this.CertificateNoInputRow()
 
-      this.InputRow('手机号', '请输入手机号', this.phone, (value: string) => {
-        this.vm.phone = value
-        this.syncFromVm()
-      })
+      this.PhoneInputRow()
 
       Row() {
         Text('设为默认观演人')
@@ -240,23 +237,75 @@ struct AudienceEditPage {
   }
 
   @Builder
-  private InputRow(label: string, placeholder: string, value: string, onChange: (value: string) => void) {
+  private RealNameInputRow() {
     Column() {
-      Text(label)
+      Text('姓名')
         .fontSize(14)
         .fontColor('#666666')
         .width('100%')
 
-      TextInput({
-        placeholder: placeholder,
-        text: value
-      })
-        .height(42)
-        .fontSize(15)
-        .backgroundColor('#F7F7F7')
-        .borderRadius(8)
-        .margin({ top: 8 })
-        .onChange(onChange)
+      ForEach(['realName_' + this.inputRefreshVersion.toString()], (inputKey: string) => {
+        TextInput({ placeholder: '请输入姓名', text: this.realName })
+          .height(42)
+          .fontSize(15)
+          .backgroundColor('#F7F7F7')
+          .borderRadius(8)
+          .margin({ top: 8 })
+          .onChange((value: string) => {
+            this.vm.realName = value
+            this.syncFromVm()
+          })
+      }, (inputKey: string) => inputKey)
+    }
+    .width('100%')
+    .margin({ bottom: 14 })
+  }
+
+  @Builder
+  private CertificateNoInputRow() {
+    Column() {
+      Text('证件号')
+        .fontSize(14)
+        .fontColor('#666666')
+        .width('100%')
+
+      ForEach(['certificateNo_' + this.inputRefreshVersion.toString()], (inputKey: string) => {
+        TextInput({ placeholder: '请输入证件号', text: this.certificateNo })
+          .height(42)
+          .fontSize(15)
+          .backgroundColor('#F7F7F7')
+          .borderRadius(8)
+          .margin({ top: 8 })
+          .onChange((value: string) => {
+            this.vm.certificateNo = value
+            this.syncFromVm()
+          })
+      }, (inputKey: string) => inputKey)
+    }
+    .width('100%')
+    .margin({ bottom: 14 })
+  }
+
+  @Builder
+  private PhoneInputRow() {
+    Column() {
+      Text('手机号')
+        .fontSize(14)
+        .fontColor('#666666')
+        .width('100%')
+
+      ForEach(['phone_' + this.inputRefreshVersion.toString()], (inputKey: string) => {
+        TextInput({ placeholder: '请输入手机号', text: this.phone })
+          .height(42)
+          .fontSize(15)
+          .backgroundColor('#F7F7F7')
+          .borderRadius(8)
+          .margin({ top: 8 })
+          .onChange((value: string) => {
+            this.vm.phone = value
+            this.syncFromVm()
+          })
+      }, (inputKey: string) => inputKey)
     }
     .width('100%')
     .margin({ bottom: 14 })
@@ -348,7 +397,7 @@ struct AudienceEditPage {
     .backgroundColor('#FFFFFF')
   }
 
-  private saveAudience(): void {
+  private async saveAudience(): Promise<void> {
     if (!this.isAgreeRule) {
       promptAction.showToast({ message: '请先阅读并同意实名制须知' })
       return
@@ -366,8 +415,8 @@ struct AudienceEditPage {
     this.userId = effectiveUserId
 
     const success: boolean = this.isEditMode() ?
-      this.vm.updateAudience() :
-      this.vm.createAudience()
+      await this.vm.updateAudience() :
+      await this.vm.createAudience()
 
     this.syncFromVm()
 

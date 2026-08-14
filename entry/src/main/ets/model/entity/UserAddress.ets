@@ -22,6 +22,18 @@ export interface UserAddress {
   /** 收货人手机号：实体层保存完整手机号，VO 层负责脱敏展示 */
   receiverPhone: string
 
+  /** 国家编码，当前中国大陆为 CN */
+  countryCode: string
+
+  /** 省级 6 位行政区编码 */
+  provinceCode: string
+
+  /** 市级 6 位行政区编码 */
+  cityCode: string
+
+  /** 区县级 6 位行政区编码 */
+  areaCode: string
+
   /** 省 */
   province: string
 

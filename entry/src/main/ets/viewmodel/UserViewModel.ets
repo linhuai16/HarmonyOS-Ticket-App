@@ -12,11 +12,7 @@ import {
 
 import { UserDataUtil } from '../utils/UserDataUtil'
 
-/**
-登录页：发送验证码、手机号验证码登录
-我的页：加载用户信息、判断登录状态、退出登录
-用户信息管理页：修改头像、昵称、手机号
- */
+/** 登录页 / 我的页 / 用户资料页 VM。 */
 export class UserViewModel {
   minePageVO: MinePageVO | undefined = undefined
   user: MineUserVO | undefined = undefined
@@ -34,7 +30,7 @@ export class UserViewModel {
 
   private userRepository: UserRepository = new UserRepository()
 
-  sendSmsCode(phone: string): boolean {
+  async sendSmsCode(phone: string): Promise<boolean> {
     if (!this.isValidPhone(phone.trim())) {
       this.errorMessage = '手机号格式不正确'
       return false
@@ -44,20 +40,22 @@ export class UserViewModel {
     this.errorMessage = ''
     this.phone = phone.trim()
 
-    const response: SendSmsCodeResponse =
-      this.userRepository.sendSmsCode(this.phone)
-
-    this.isSendingCode = false
-
-    if (!response.success) {
-      this.errorMessage = '验证码发送失败'
+    try {
+      const response: SendSmsCodeResponse = await this.userRepository.sendSmsCode(this.phone)
+      this.isSendingCode = false
+      if (!response.success) {
+        this.errorMessage = '验证码发送失败'
+        return false
+      }
+      return true
+    } catch (error) {
+      this.isSendingCode = false
+      this.errorMessage = error instanceof Error ? error.message : '验证码发送失败'
       return false
     }
-
-    return true
   }
 
-  login(phone: string, smsCode: string): boolean {
+  async login(phone: string, smsCode: string): Promise<boolean> {
     const normalizedPhone: string = phone.trim()
 
     if (!this.isValidPhone(normalizedPhone)) {
@@ -73,51 +71,55 @@ export class UserViewModel {
     this.isLoggingIn = true
     this.errorMessage = ''
 
-    const response: LoginResponse | undefined =
-      this.userRepository.login(normalizedPhone, smsCode)
+    try {
+      const response: LoginResponse | undefined = await this.userRepository.login(normalizedPhone, smsCode)
+      this.isLoggingIn = false
 
-    this.isLoggingIn = false
+      if (response === undefined) {
+        this.errorMessage = '登录失败，请检查手机号或验证码'
+        return false
+      }
 
-    if (response === undefined) {
-      this.errorMessage = '登录失败，请检查手机号或验证码'
+      this.token = response.token
+      this.user = response.user
+      this.phone = response.user.phone ?? normalizedPhone
+      this.isLoginStatus = true
+      return true
+    } catch (error) {
+      this.isLoggingIn = false
+      this.errorMessage = error instanceof Error ? error.message : '登录失败，请检查手机号或验证码'
       return false
     }
-
-    this.token = response.token
-    this.user = response.user
-    this.phone = response.user.phone ?? normalizedPhone
-    this.isLoginStatus = true
-
-    return true
   }
 
-  loadMinePage(userId: string): void {
+  async loadMinePage(userId: string): Promise<void> {
     this.isLoadingMine = true
     this.errorMessage = ''
 
-    const pageVO: MinePageVO | undefined =
-      this.userRepository.getMinePage(userId)
+    try {
+      const pageVO: MinePageVO | undefined = await this.userRepository.getMinePage(userId)
+      if (pageVO === undefined) {
+        this.errorMessage = '用户信息不存在'
+        this.isLoadingMine = false
+        return
+      }
 
-    if (pageVO === undefined) {
-      this.errorMessage = '用户信息不存在'
+      this.minePageVO = pageVO
+      this.user = pageVO.user
+      this.phone = pageVO.user.phone ?? ''
+      this.isLoginStatus = true
       this.isLoadingMine = false
-      return
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '用户信息加载失败'
+      this.isLoadingMine = false
     }
-
-    this.minePageVO = pageVO
-    this.user = pageVO.user
-    this.phone = pageVO.user.phone ?? ''
-    this.isLoginStatus = true
-
-    this.isLoadingMine = false
   }
 
-  loadCurrentUser(): void {
+  async loadCurrentUser(): Promise<void> {
     this.isLoginStatus = this.userRepository.isLogin()
     this.token = this.userRepository.getToken()
 
     const currentUser = this.userRepository.getCurrentUser()
-
     if (currentUser === undefined) {
       this.user = undefined
       this.minePageVO = undefined
@@ -125,35 +127,36 @@ export class UserViewModel {
       return
     }
 
-    this.loadMinePage(currentUser.userId)
+    await this.loadMinePage(currentUser.userId)
   }
 
-  updateUserProfile(userId: string, nickname: string, phone: string, avatarUrl: string): boolean {
+  async updateUserProfile(userId: string, nickname: string, phone: string, avatarUrl: string): Promise<boolean> {
     this.isSavingProfile = true
     this.errorMessage = ''
 
-    const response: UpdateUserProfileResponse =
-      this.userRepository.updateUserProfile(userId, nickname, phone, avatarUrl)
+    try {
+      const response: UpdateUserProfileResponse = await this.userRepository.updateUserProfile(userId, nickname, phone, avatarUrl)
+      this.isSavingProfile = false
 
-    this.isSavingProfile = false
+      if (!response.success || response.user === undefined) {
+        this.errorMessage = response.message
+        return false
+      }
 
-    if (!response.success || response.user === undefined) {
-      this.errorMessage = response.message
+      this.user = response.user
+      this.phone = response.user.phone ?? ''
+      this.minePageVO = { user: response.user }
+      this.isLoginStatus = true
+      return true
+    } catch (error) {
+      this.isSavingProfile = false
+      this.errorMessage = error instanceof Error ? error.message : '保存失败'
       return false
     }
-
-    this.user = response.user
-    this.phone = response.user.phone ?? ''
-    this.minePageVO = {
-      user: response.user
-    }
-    this.isLoginStatus = true
-    return true
   }
 
   logout(): void {
     this.userRepository.logout()
-
     this.minePageVO = undefined
     this.user = undefined
     this.phone = ''
@@ -171,7 +174,6 @@ export class UserViewModel {
     if (this.user === undefined) {
       return this.userRepository.getCurrentUserId()
     }
-
     return this.user.userId
   }
 

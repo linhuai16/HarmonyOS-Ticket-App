@@ -27,7 +27,7 @@ export interface ElectronicTicket {
   /** 票状态 */
   ticketStatus: TicketStatus
 
-  /** 二维码地址或二维码内容 */
+  /** 静态二维码地址或内容。DYNAMIC_QR 明文禁止写入实体，只能使用 DynamicCredentialVO 短时展示。 */
   qrCodeValue?: string
 
   /** 座位信息 */

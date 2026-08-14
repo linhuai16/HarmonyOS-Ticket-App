@@ -25,6 +25,7 @@ struct AddressEditPage {
   private lastLoadKey: string = ''
   private isWaitingLoginBack: boolean = false
 
+  @State inputRefreshVersion: number = 0
   @State userId: string = ''
   @State from: string = ''
   @State receiverName: string = ''
@@ -49,7 +50,7 @@ struct AddressEditPage {
     }
   }
 
-  private loadPageData(allowLoginRedirect: boolean): void {
+  private async loadPageData(allowLoginRedirect: boolean): Promise<void> {
     const params: AddressEditRouteParams = this.getRouteParams()
     const userId: string = this.resolveEffectiveUserId(params.userId ?? '')
     const addressId: string = params.addressId ?? ''
@@ -71,7 +72,7 @@ struct AddressEditPage {
     this.from = from
 
     if (addressId.length > 0) {
-      this.vm.loadDetail(userId, addressId)
+      await this.vm.loadDetail(userId, addressId)
     } else {
       this.vm.resetForm(userId)
     }
@@ -80,6 +81,7 @@ struct AddressEditPage {
     this.lastLoadKey = loadKey
     this.isWaitingLoginBack = false
     this.syncFromVm()
+    this.refreshInputText()
   }
 
   private getRouteParams(): AddressEditRouteParams {
@@ -130,6 +132,10 @@ struct AddressEditPage {
     this.isDefault = this.vm.isDefault
     this.errorMessage = this.vm.errorMessage
     this.canSaveValue = this.vm.canSave()
+  }
+
+  private refreshInputText(): void {
+    this.inputRefreshVersion++
   }
 
   build() {
@@ -185,24 +191,15 @@ struct AddressEditPage {
   @Builder
   private FormArea() {
     Column() {
-      this.InputRow('收货人', '请输入收货人姓名', this.receiverName, (value: string) => {
-        this.vm.receiverName = value
-        this.syncFromVm()
-      })
+      this.ReceiverNameInputRow()
 
-      this.InputRow('手机号', '请输入手机号', this.receiverPhone, (value: string) => {
-        this.vm.receiverPhone = value
-        this.syncFromVm()
-      })
+      this.ReceiverPhoneInputRow()
 
       this.ProvinceSelectRow()
       this.CitySelectRow()
       this.DistrictSelectRow()
 
-      this.InputRow('门牌号', '请输入详细地址', this.detailAddress, (value: string) => {
-        this.vm.detailAddress = value
-        this.syncFromVm()
-      })
+      this.DetailAddressInputRow()
 
       Row() {
         Text('设为默认地址')
@@ -228,23 +225,75 @@ struct AddressEditPage {
   }
 
   @Builder
-  private InputRow(label: string, placeholder: string, value: string, onChange: (value: string) => void) {
+  private ReceiverNameInputRow() {
     Column() {
-      Text(label)
+      Text('收货人')
         .fontSize(14)
         .fontColor('#666666')
         .width('100%')
 
-      TextInput({
-        placeholder: placeholder,
-        text: value
-      })
-        .height(42)
-        .fontSize(15)
-        .backgroundColor('#F7F7F7')
-        .borderRadius(8)
-        .margin({ top: 8 })
-        .onChange(onChange)
+      ForEach(['receiverName_' + this.inputRefreshVersion.toString()], (inputKey: string) => {
+        TextInput({ placeholder: '请输入收货人姓名', text: this.receiverName })
+          .height(42)
+          .fontSize(15)
+          .backgroundColor('#F7F7F7')
+          .borderRadius(8)
+          .margin({ top: 8 })
+          .onChange((value: string) => {
+            this.vm.receiverName = value
+            this.syncFromVm()
+          })
+      }, (inputKey: string) => inputKey)
+    }
+    .width('100%')
+    .margin({ bottom: 14 })
+  }
+
+  @Builder
+  private ReceiverPhoneInputRow() {
+    Column() {
+      Text('手机号')
+        .fontSize(14)
+        .fontColor('#666666')
+        .width('100%')
+
+      ForEach(['receiverPhone_' + this.inputRefreshVersion.toString()], (inputKey: string) => {
+        TextInput({ placeholder: '请输入手机号', text: this.receiverPhone })
+          .height(42)
+          .fontSize(15)
+          .backgroundColor('#F7F7F7')
+          .borderRadius(8)
+          .margin({ top: 8 })
+          .onChange((value: string) => {
+            this.vm.receiverPhone = value
+            this.syncFromVm()
+          })
+      }, (inputKey: string) => inputKey)
+    }
+    .width('100%')
+    .margin({ bottom: 14 })
+  }
+
+  @Builder
+  private DetailAddressInputRow() {
+    Column() {
+      Text('门牌号')
+        .fontSize(14)
+        .fontColor('#666666')
+        .width('100%')
+
+      ForEach(['detailAddress_' + this.inputRefreshVersion.toString()], (inputKey: string) => {
+        TextInput({ placeholder: '请输入详细地址', text: this.detailAddress })
+          .height(42)
+          .fontSize(15)
+          .backgroundColor('#F7F7F7')
+          .borderRadius(8)
+          .margin({ top: 8 })
+          .onChange((value: string) => {
+            this.vm.detailAddress = value
+            this.syncFromVm()
+          })
+      }, (inputKey: string) => inputKey)
     }
     .width('100%')
     .margin({ bottom: 14 })
@@ -368,7 +417,7 @@ struct AddressEditPage {
     .backgroundColor('#FFFFFF')
   }
 
-  private saveAddress(): void {
+  private async saveAddress(): Promise<void> {
     const effectiveUserId: string = this.resolveEffectiveUserId(this.vm.userId)
     if (effectiveUserId.length === 0 || !this.userRepository.isLogin()) {
       promptAction.showToast({ message: '请先登录后再保存收货地址' })
@@ -381,8 +430,8 @@ struct AddressEditPage {
     this.userId = effectiveUserId
 
     const success: boolean = this.isEditMode() ?
-      this.vm.updateAddress() :
-      this.vm.createAddress()
+      await this.vm.updateAddress() :
+      await this.vm.createAddress()
 
     this.syncFromVm()
 

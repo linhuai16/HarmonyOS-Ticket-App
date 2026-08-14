@@ -8,6 +8,6 @@ export interface MineUserVO {
   phone?: string
   /** 用户昵称 */
   nickname?: string
-  /** 用户头像。当前一期 Mock 为头像标识，不接真实相册上传。 */
+  /** 用户头像。当前一期使用后端返回的头像 URL 或资源标识，不接真实相册上传。 */
   avatarUrl?: string
 }

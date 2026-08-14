@@ -12,12 +12,15 @@ export interface RefundRuleStage {
   /** 所属退款规则ID */
   refundRuleId: string
 
-  /** 开演前多少小时以上适用该阶梯 */
-  beforeStartHours: number
+  /** 距离开演至少多少分钟，包含该值 */
+  minBeforeStartMinutes: number
+
+  /** 距离开演小于多少分钟，空表示无上限 */
+  maxBeforeStartMinutes?: number
 
   /** 手续费比例，如 0.2 表示扣 20% */
   feeRate: number
 
-  /** 同一退款规则下的展示 / 计算排序 */
+  /** 同一退款规则下的展示排序 */
   sortOrder: number
 }

@@ -8,46 +8,158 @@ import {
   ElectronicTicketVO
 } from '../model/vo/ticket/TicketDetailPageVO'
 
-import { Order } from '../model/entity/Order'
-import { OrderItem } from '../model/entity/OrderItem'
-import { PerformanceProject } from '../model/entity/PerformanceProject'
-import { PerformanceSession } from '../model/entity/PerformanceSession'
-import { ElectronicTicket } from '../model/entity/ElectronicTicket'
-import { OrderAudience } from '../model/entity/OrderAudience'
-
-
-import { OrderStatus } from '../model/enums/OrderStatus'
 import { TicketStatus } from '../model/enums/TicketStatus'
-import { DateTimeUtil } from '../utils/DateTimeUtil'
-import { MaskUtil } from '../utils/MaskUtil'
-import { IdGenerator } from '../utils/IdGenerator'
+import { CertificateType } from '../model/enums/CertificateType'
+import { CredentialType, DynamicQrMode } from '../model/vo/ticketsource/TicketSourceTypes'
+import { ApiClient, ApiQueryParam } from '../network/ApiClient'
 import { AppStorageVersionUtil } from '../utils/AppStorageVersionUtil'
-import { PerformanceDataUtil } from '../utils/PerformanceDataUtil'
-import { TicketDataUtil } from '../utils/TicketDataUtil'
-import { RefundDataUtil } from '../utils/RefundDataUtil'
 
 const CUSTOMER_SERVICE_PHONE: string = '400-000-0000'
 
-/**
- * 票夹 / 电子票 Repository。
- *
- * 对外保留票夹列表、电子票详情、Mock 出票/检票调试方法；
- * 基础查找、排序、脱敏、时间、ID、AppStorage 版本号更新统一复用 utils。
- */
+interface BackendTicketFolderPageVO {
+  userId?: number | string
+  total?: number
+  items?: BackendTicketFolderItemVO[]
+  tickets?: BackendTicketFolderItemVO[]
+}
+
+interface BackendTicketFolderItemVO {
+  orderId: number | string
+  orderNo?: string
+  orderStatus?: string
+  projectId?: number | string
+  sessionId?: number | string
+  title: string
+  posterUrl: string
+  cityName?: string
+  stationName?: string
+  startTime: string
+  endTime?: string
+  venueName: string
+  venueAddress?: string
+  venueLongitude?: number | string | null
+  venueLatitude?: number | string | null
+  deliveryType?: string
+  deliveryMode?: string
+  skuSummary?: string
+  skuName?: string
+  totalQuantity?: number
+  payAmount?: number
+  ticketCount: number
+  defaultTicketId?: number | string
+  ticketId?: number | string
+  ticketStatus: string
+  displayStatus: 'UNUSED' | 'UNAVAILABLE'
+  createTime?: string
+}
+
+interface BackendTicketDetailPageVO {
+  orderId: number | string
+  orderNo?: string
+  orderStatus?: string
+  projectId?: number | string
+  sessionId?: number | string
+  title: string
+  posterUrl: string
+  cityName?: string
+  stationName?: string
+  startTime: string
+  endTime?: string
+  venueName: string
+  venueAddress?: string
+  venueLongitude?: number | string | null
+  venueLatitude?: number | string | null
+  deliveryType?: string
+  deliveryMode?: string
+  totalQuantity?: number
+  payAmount?: number
+  defaultTicketId?: number | string
+  tickets?: BackendElectronicTicketVO[]
+  customerServicePhone?: string
+}
+
+interface BackendElectronicTicketVO {
+  ticketId: number | string
+  ticketNo?: string
+  orderId?: number | string
+  orderItemId?: number | string
+  orderAudienceId?: number | string
+  ticketStatus: string
+  credentialType?: string | null
+  dynamicQrMode?: string | null
+  credentialVersion?: string | null
+  credentialExpireTime?: string | null
+  refreshAfterSeconds?: number | string | null
+  credentialDisplayValue?: string | null
+  qrCodeValue?: string | null
+  seatInfo?: string
+  entranceInfo?: string | null
+  generateTime?: string
+  checkTime?: string
+  expireTime?: string
+  abnormalReason?: string
+  skuId?: number | string
+  skuName: string
+  unitPrice?: number
+  realName?: string
+  audienceName?: string
+  certificateType?: string
+  maskedCertificateNo?: string
+}
+
+interface MockTicketIssueSuccessResponse {
+  success: boolean
+  orderId: number | string
+  orderStatus: string
+  issuedCount?: number
+  ticketIssuedTime?: string
+}
+
+interface MockTicketIssueFailedResponse {
+  success: boolean
+  orderId: number | string
+  orderStatus: string
+  refundId?: number | string
+  refundNo?: string
+  expiredCount?: number
+}
+
+interface MockTicketCheckResponse {
+  success: boolean
+  ticketId: number | string
+  orderId: number | string
+  ticketStatus: string
+  checkTime?: string
+}
+
+/** 票夹 / 电子票 Repository：从 SpringBoot 接口读写，不再使用 Mock。 */
 export class TicketRepository {
-  getTicketFolderPage(userId: string): TicketFolderPageVO {
-    const tickets: TicketFolderItemVO[] = []
+  async getTicketFolderPage(userId: string): Promise<TicketFolderPageVO> {
+    if (userId.length === 0) {
+      return { tickets: [] }
+    }
 
-    TicketDataUtil.getTicketFolderOrders(userId).forEach((order: Order) => {
-      const item: TicketFolderItemVO | undefined = this.buildTicketFolderItem(order)
+    const response: BackendTicketFolderPageVO =
+      await ApiClient.get<BackendTicketFolderPageVO>('/api/ticket-source/user/v13/users/' + encodeURIComponent(userId) + '/ticket-folder')
 
-      if (item !== undefined) {
-        tickets.push(item)
+    const rawItems: BackendTicketFolderItemVO[] = response.items ?? response.tickets ?? []
+    const tickets: TicketFolderItemVO[] = rawItems.map((item: BackendTicketFolderItemVO): TicketFolderItemVO => {
+      return {
+        orderId: String(item.orderId),
+        orderStatus: item.orderStatus,
+        ticketId: this.toOptionalString(item.defaultTicketId ?? item.ticketId),
+        posterUrl: item.posterUrl,
+        projectTitle: item.title,
+        startTime: item.startTime,
+        venueName: item.venueName,
+        venueAddress: item.venueAddress ?? '',
+        deliveryType: item.deliveryType ?? 'ETICKET',
+        deliveryMode: item.deliveryMode,
+        ticketCount: Number(item.ticketCount),
+        skuName: item.skuSummary ?? item.skuName ?? '',
+        displayStatus: item.displayStatus,
+        ticketStatus: item.ticketStatus as TicketStatus
       }
-    })
-
-    tickets.sort((a: TicketFolderItemVO, b: TicketFolderItemVO) => {
-      return TicketDataUtil.compareTicketFolderItem(a, b)
     })
 
     return {
@@ -55,193 +167,141 @@ export class TicketRepository {
     }
   }
 
-  getTicketDetailPage(userId: string, orderId: string, ticketId: string | undefined = undefined): TicketDetailPageVO | undefined {
-    const order: Order | undefined = TicketDataUtil.findUserOrder(userId, orderId)
-
-    if (order === undefined) {
+  async getTicketDetailPage(userId: string, orderId: string, ticketId: string | undefined = undefined): Promise<TicketDetailPageVO | undefined> {
+    if (userId.length === 0 || orderId.length === 0) {
       return undefined
     }
 
-    const project: PerformanceProject | undefined = PerformanceDataUtil.findProject(order.projectId)
-    const session: PerformanceSession | undefined = PerformanceDataUtil.findSession(order.sessionId)
-    const orderItem: OrderItem | undefined = TicketDataUtil.findOrderItem(order.orderId)
+    const params: ApiQueryParam[] = [
+      new ApiQueryParam('userId', userId)
+    ]
 
-    if (project === undefined || session === undefined || orderItem === undefined) {
-      return undefined
+    if (ticketId !== undefined && ticketId.length > 0) {
+      params.push(new ApiQueryParam('ticketId', ticketId))
     }
 
-    const ticketList: ElectronicTicket[] = TicketDataUtil.sortTickets(TicketDataUtil.getTicketsByOrderId(orderId))
+    const response: BackendTicketDetailPageVO =
+      await ApiClient.get<BackendTicketDetailPageVO>('/api/ticket-source/user/v13/orders/' + encodeURIComponent(orderId) + '/ticket-detail', params)
 
-    if (ticketList.length === 0 || !this.isValidOpenTicket(ticketList, ticketId)) {
-      return undefined
-    }
-
-    return {
-      posterUrl: project.posterUrl,
-      projectTitle: project.title,
-      startTime: session.startTime,
-      venueName: PerformanceDataUtil.getVenueName(session.venueId),
-      tickets: this.buildElectronicTicketVOList(ticketList, orderItem),
-      customerServicePhone: CUSTOMER_SERVICE_PHONE
-    }
-  }
-
-  mockIssueSuccess(orderId: string): boolean {
-    const order: Order | undefined = TicketDataUtil.findOrder(orderId)
-
-    if (order === undefined || order.orderStatus !== OrderStatus.WAIT_USE) {
-      return false
-    }
-
-    const tickets: ElectronicTicket[] = TicketDataUtil.getTicketsByOrderIdAndStatus(orderId, TicketStatus.GENERATING)
-
-    if (tickets.length === 0) {
-      return false
-    }
-
-    const nowTime: string = DateTimeUtil.now()
-
-    tickets.forEach((ticket: ElectronicTicket) => {
-      ticket.ticketStatus = TicketStatus.UNUSED
-      ticket.qrCodeValue = IdGenerator.createQrCodeValue(ticket.ticketId)
-      ticket.generateTime = nowTime
-    })
-
-    order.ticketIssuedTime = nowTime
-    AppStorageVersionUtil.bumpTicketChangedVersion()
-
-    return true
-  }
-
-  mockIssueFailed(orderId: string, reason: string = '出票接口异常，系统已发起原路退款'): boolean {
-    const order: Order | undefined = TicketDataUtil.findOrder(orderId)
-
-    if (order === undefined || order.orderStatus !== OrderStatus.WAIT_USE) {
-      return false
-    }
-
-    const tickets: ElectronicTicket[] = TicketDataUtil.getTicketsByOrderId(orderId)
-
-    if (tickets.length === 0) {
-      return false
-    }
-
-    const nowTime: string = DateTimeUtil.now()
-
-    tickets.forEach((ticket: ElectronicTicket) => {
-      ticket.ticketStatus = TicketStatus.EXPIRED
-      ticket.expireTime = nowTime
-      ticket.abnormalReason = reason
-    })
-
-    order.orderStatus = OrderStatus.REFUND_SUCCESS
-    this.createSystemRefundRecord(order, nowTime)
-    AppStorageVersionUtil.bumpTicketChangedVersion()
-
-    return true
-  }
-
-  mockCheckTicket(ticketId: string): boolean {
-    const ticket: ElectronicTicket | undefined = TicketDataUtil.findTicket(ticketId)
-
-    if (ticket === undefined || ticket.ticketStatus !== TicketStatus.UNUSED) {
-      return false
-    }
-
-    ticket.ticketStatus = TicketStatus.CHECKED
-    ticket.checkTime = DateTimeUtil.now()
-    AppStorageVersionUtil.bumpTicketChangedVersion()
-
-    return true
-  }
-
-  mockExpireUnusedTickets(orderId: string): boolean {
-    const tickets: ElectronicTicket[] = TicketDataUtil.getTicketsByOrderIdAndStatus(orderId, TicketStatus.UNUSED)
-
-    if (tickets.length === 0) {
-      return false
-    }
-
-    const nowTime: string = DateTimeUtil.now()
-
-    tickets.forEach((ticket: ElectronicTicket) => {
-      ticket.ticketStatus = TicketStatus.EXPIRED
-      ticket.expireTime = nowTime
-    })
-
-    AppStorageVersionUtil.bumpTicketChangedVersion()
-
-    return true
-  }
-
-  private createSystemRefundRecord(order: Order, refundTime: string): void {
-    RefundDataUtil.upsertRefundSuccessRecord(order, refundTime)
-  }
-
-  private buildTicketFolderItem(order: Order): TicketFolderItemVO | undefined {
-    const project: PerformanceProject | undefined = PerformanceDataUtil.findProject(order.projectId)
-    const session: PerformanceSession | undefined = PerformanceDataUtil.findSession(order.sessionId)
-    const orderItem: OrderItem | undefined = TicketDataUtil.findOrderItem(order.orderId)
-
-    if (project === undefined || session === undefined || orderItem === undefined) {
-      return undefined
-    }
-
-    const tickets: ElectronicTicket[] = TicketDataUtil.getTicketsByOrderId(order.orderId)
-
-    if (tickets.length === 0) {
-      return undefined
-    }
-
-    const defaultTicket: ElectronicTicket | undefined = TicketDataUtil.findDefaultTicket(tickets)
-
-    if (defaultTicket === undefined) {
-      return undefined
-    }
-
-    return {
-      orderId: order.orderId,
-      ticketId: defaultTicket.ticketId,
-      posterUrl: project.posterUrl,
-      projectTitle: project.title,
-      startTime: session.startTime,
-      venueName: PerformanceDataUtil.getVenueName(session.venueId),
-      ticketCount: tickets.length,
-      skuName: orderItem.skuName,
-      displayStatus: TicketDataUtil.buildDisplayStatus(tickets),
-      ticketStatus: defaultTicket.ticketStatus
-    }
-  }
-
-  private buildElectronicTicketVOList(tickets: ElectronicTicket[], orderItem: OrderItem): ElectronicTicketVO[] {
-    const sortedTickets: ElectronicTicket[] = TicketDataUtil.sortTickets(tickets)
-    const ticketTotal: number = sortedTickets.length
-
-    return sortedTickets.map((ticket: ElectronicTicket, index: number): ElectronicTicketVO => {
-      const audience: OrderAudience | undefined = TicketDataUtil.findOrderAudience(ticket.orderAudienceId)
-
+    const rawTickets: BackendElectronicTicketVO[] = response.tickets ?? []
+    const ticketTotal: number = rawTickets.length
+    const tickets: ElectronicTicketVO[] = rawTickets.map((ticket: BackendElectronicTicketVO, index: number): ElectronicTicketVO => {
+      const maskedCertificateNo: string = ticket.maskedCertificateNo ?? '-'
+      const audienceName: string = ticket.realName ?? ticket.audienceName ?? '观演人信息异常'
       return {
-        ticketId: ticket.ticketId,
-        ticketStatus: ticket.ticketStatus,
+        ticketId: String(ticket.ticketId),
+        ticketStatus: ticket.ticketStatus as TicketStatus,
         ticketIndex: index + 1,
         ticketTotal: ticketTotal,
-        qrCodeValue: ticket.qrCodeValue,
-        skuName: orderItem.skuName,
-        seatInfo: ticket.seatInfo,
-        audienceName: audience === undefined ? '观演人信息异常' : audience.realName,
-        certificateType: audience?.certificateType,
-        maskedCertificateNo: audience === undefined ? '-' : MaskUtil.maskCertificateNo(audience.certificateNo),
-        abnormalReason: ticket.abnormalReason
+        credentialType: this.toCredentialType(ticket.credentialType),
+        dynamicQrMode: this.toDynamicQrMode(ticket.dynamicQrMode),
+        credentialVersion: this.toOptionalString(ticket.credentialVersion),
+        credentialExpireTime: this.toOptionalString(ticket.credentialExpireTime),
+        refreshAfterSeconds: ticket.refreshAfterSeconds === undefined || ticket.refreshAfterSeconds === null ? undefined : Number(ticket.refreshAfterSeconds),
+        credentialDisplayValue: this.toOptionalString(ticket.credentialDisplayValue),
+        qrCodeValue: this.toOptionalString(ticket.qrCodeValue),
+        skuName: ticket.skuName ?? '',
+        seatInfo: this.toOptionalString(ticket.seatInfo),
+        entranceInfo: this.toOptionalString(ticket.entranceInfo),
+        audienceName: audienceName,
+        certificateType: ticket.certificateType as CertificateType,
+        maskedCertificateNo: maskedCertificateNo,
+        abnormalReason: this.toOptionalString(ticket.abnormalReason)
       }
     })
+
+    return {
+      posterUrl: response.posterUrl,
+      projectTitle: response.title,
+      startTime: response.startTime,
+      venueName: response.venueName,
+      venueAddress: response.venueAddress ?? '',
+      venueLongitude: this.toOptionalNumber(response.venueLongitude),
+      venueLatitude: this.toOptionalNumber(response.venueLatitude),
+      orderStatus: response.orderStatus,
+      deliveryType: response.deliveryType ?? 'ETICKET',
+      deliveryMode: response.deliveryMode,
+      totalQuantity: Number(response.totalQuantity ?? rawTickets.length),
+      tickets: tickets,
+      customerServicePhone: response.customerServicePhone ?? CUSTOMER_SERVICE_PHONE
+    }
   }
 
-  private isValidOpenTicket(tickets: ElectronicTicket[], ticketId: string | undefined): boolean {
-    if (ticketId === undefined || ticketId.length === 0) {
-      return true
+  async mockIssueSuccess(orderId: string): Promise<boolean> {
+    if (orderId.length === 0) {
+      return false
     }
 
-    const existTicket: ElectronicTicket | undefined = tickets.find((item: ElectronicTicket) => item.ticketId === ticketId)
-    return existTicket !== undefined
+    const response: MockTicketIssueSuccessResponse =
+      await ApiClient.post<MockTicketIssueSuccessResponse>('/api/mock/orders/' + encodeURIComponent(orderId) + '/tickets/issue-success')
+
+    if (response.success) {
+      AppStorageVersionUtil.bumpOrderTicketRelatedVersions()
+    }
+
+    return response.success
   }
+
+  async mockIssueFailed(orderId: string, reason: string = '出票接口异常，系统已发起原路退款'): Promise<boolean> {
+    if (orderId.length === 0) {
+      return false
+    }
+
+    const response: MockTicketIssueFailedResponse =
+      await ApiClient.post<MockTicketIssueFailedResponse>('/api/mock/orders/' + encodeURIComponent(orderId) + '/tickets/issue-failed?' +
+        'abnormalReason=' + encodeURIComponent(reason))
+
+    if (response.success) {
+      AppStorageVersionUtil.bumpOrderTicketRelatedVersions()
+    }
+
+    return response.success
+  }
+
+  async mockCheckTicket(ticketId: string): Promise<boolean> {
+    if (ticketId.length === 0) {
+      return false
+    }
+
+    const response: MockTicketCheckResponse =
+      await ApiClient.post<MockTicketCheckResponse>('/api/mock/tickets/' + encodeURIComponent(ticketId) + '/check')
+
+    if (response.success) {
+      AppStorageVersionUtil.bumpTicketChangedVersion()
+      AppStorageVersionUtil.bumpUserCenterChangedVersion()
+    }
+
+    return response.success
+  }
+
+  async mockExpireUnusedTickets(_orderId: string): Promise<boolean> {
+    // 后端当前没有单独的“手动过期未使用票”接口；保留方法避免调试入口报错。
+    return false
+  }
+
+  private toOptionalString(value: number | string | undefined | null): string | undefined {
+    if (value === undefined || value === null) {
+      return undefined
+    }
+    const text: string = String(value)
+    return text.length === 0 ? undefined : text
+  }
+
+  private toOptionalNumber(value: number | string | undefined | null): number | undefined {
+    if (value === undefined || value === null || String(value).length === 0) {
+      return undefined
+    }
+    const numberValue: number = Number(value)
+    return numberValue === numberValue ? numberValue : undefined
+  }
+
+  private toCredentialType(value: string | undefined | null): CredentialType | undefined {
+    return value === undefined || value === null || value.length === 0 ? undefined : value as CredentialType
+  }
+
+  private toDynamicQrMode(value: string | undefined | null): DynamicQrMode | undefined {
+    return value === undefined || value === null || value.length === 0 ? undefined : value as DynamicQrMode
+  }
+
+
 }

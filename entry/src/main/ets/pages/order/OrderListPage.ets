@@ -48,10 +48,19 @@ struct OrderListPage {
   @State isLoading: boolean = false
   @State errorMessage: string = ''
   @State pageVersion: number = 0
+  @State isRefreshingPage: boolean = false
 
   @StorageLink('order_changed_version')
   @Watch('onOrderChanged')
   orderChangedVersion: number = 0
+
+  @StorageLink('refund_changed_version')
+  @Watch('onOrderChanged')
+  refundChangedVersion: number = 0
+
+  @StorageLink('login_version')
+  @Watch('onLoginChanged')
+  loginVersion: number = 0
 
   onPageShow(): void {
     WindowImmersiveUtil.applyLight(this)
@@ -60,6 +69,18 @@ struct OrderListPage {
 
   private onOrderChanged(_propName?: string): void {
     this.reloadCurrentList()
+  }
+
+  private onLoginChanged(): void {
+    const currentUserId: string = this.userRepository.getCurrentUserId().trim()
+    if (currentUserId.length === 0 || !this.userRepository.isLogin()) {
+      this.userId = ''
+      this.orders = []
+      this.errorMessage = '请先登录后查看订单'
+      this.refreshPage()
+      return
+    }
+    this.vm.loadPage(currentUserId, this.currentTab).then(() => this.syncFromVm())
   }
 
   private reloadCurrentList(): void {
@@ -99,6 +120,15 @@ struct OrderListPage {
 
     await this.vm.loadPage(userId, tab)
     this.syncFromVm()
+  }
+
+  private async manualRefreshList(): Promise<void> {
+    if (this.isRefreshingPage) return
+    this.isRefreshingPage = true
+    await this.vm.loadPage(this.resolveUserId(this.userId), this.currentTab)
+    this.syncFromVm()
+    this.isRefreshingPage = false
+    promptAction.showToast({ message: this.errorMessage.length > 0 ? this.errorMessage : '订单列表已刷新' })
   }
 
   private resolveUserId(routeUserId?: string): string {
@@ -144,6 +174,15 @@ struct OrderListPage {
         .margin({ left: 4 })
 
       Blank()
+      Text(this.isRefreshingPage ? '刷新中' : '刷新')
+        .fontSize(14)
+        .fontColor(this.isRefreshingPage ? '#BBBBBB' : '#E33B3B')
+        .height(44)
+        .padding({ left: 10, right: 4 })
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          if (!this.isRefreshingPage) this.manualRefreshList()
+        })
     }
     .width('100%')
     .height(52)
@@ -309,7 +348,7 @@ struct OrderListPage {
           this.jumpOrderDetail(item.orderId)
         })
     } else if (item.actionType === 'VIEW_TICKET') {
-      Button('查看电子票')
+      Button(this.getTicketActionText(item))
         .height(34)
         .fontSize(13)
         .fontColor('#FFFFFF')
@@ -333,6 +372,13 @@ struct OrderListPage {
         .backgroundColor('#EEEEEE')
         .enabled(false)
     }
+  }
+
+  private getTicketActionText(item: OrderListItemVO): string {
+    if (item.deliveryType === 'PAPER_TICKET') {
+      return item.deliveryMode === 'EXPRESS' ? '查看物流' : '查看取票信息'
+    }
+    return '查看电子票'
   }
 
   private jumpOrderDetail(orderId: string): void {

@@ -40,7 +40,7 @@ struct AudiencePage {
     this.reloadCurrentUserList()
   }
 
-  private reloadCurrentUserList(): void {
+  private async reloadCurrentUserList(): Promise<void> {
     if (!this.userRepository.isLogin()) {
       router.pushUrl({ url: 'pages/user/LoginPage' })
       return
@@ -53,11 +53,11 @@ struct AudiencePage {
       return
     }
 
-    this.vm.loadList(effectiveUserId)
+    await this.vm.loadList(effectiveUserId)
     this.syncFromVm()
   }
 
-  private loadPageData(): void {
+  private async loadPageData(): Promise<void> {
     const params: AudienceRouteParams = (router.getParams() ?? {}) as AudienceRouteParams
     const routeUserId: string = params.userId ?? ''
     const currentUserId: string = this.userRepository.getCurrentUserId().trim()
@@ -68,7 +68,7 @@ struct AudiencePage {
       return
     }
 
-    this.vm.loadList(userId)
+    await this.vm.loadList(userId)
     this.syncFromVm()
   }
 
@@ -123,6 +123,13 @@ struct AudiencePage {
         .margin({ left: 8 })
 
       Blank()
+      Text('刷新')
+        .fontSize(14)
+        .fontColor('#E33B3B')
+        .height(44)
+        .padding({ left: 10, right: 4 })
+        .textAlign(TextAlign.Center)
+        .onClick(() => { this.loadPageData() })
     }
     .width('100%')
     .height(52)
@@ -143,7 +150,11 @@ struct AudiencePage {
 
   @Builder
   private ListArea() {
-    if (this.audienceList.length === 0) {
+    if (this.isLoading && this.audienceList.length === 0) {
+      this.LoadingArea('正在加载观演人信息...')
+    } else if (this.audienceList.length === 0 && this.errorMessage.length > 0) {
+      this.ErrorArea(this.errorMessage)
+    } else if (this.audienceList.length === 0) {
       Column() {
         Text('暂无观演人信息')
           .fontSize(15)
@@ -166,6 +177,49 @@ struct AudiencePage {
       .layoutWeight(1)
       .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     }
+  }
+
+  @Builder
+  private LoadingArea(message: string) {
+    Column() {
+      LoadingProgress()
+        .width(32)
+        .height(32)
+        .color('#E33B3B')
+
+      Text(message)
+        .fontSize(14)
+        .fontColor('#999999')
+        .margin({ top: 12 })
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  private ErrorArea(message: string) {
+    Column() {
+      Text(message)
+        .fontSize(15)
+        .fontColor('#E33B3B')
+        .textAlign(TextAlign.Center)
+        .padding({ left: 24, right: 24 })
+
+      Text('点击重试')
+        .fontSize(14)
+        .fontColor('#FFFFFF')
+        .padding({ left: 18, right: 18, top: 8, bottom: 8 })
+        .margin({ top: 14 })
+        .backgroundColor('#E33B3B')
+        .borderRadius(18)
+        .onClick(() => {
+          this.reloadCurrentUserList()
+        })
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
   }
 
   @Builder
@@ -306,8 +360,8 @@ struct AudiencePage {
     })
   }
 
-  private setDefaultAudience(audienceId: string): void {
-    const success: boolean = this.vm.setDefaultAudience(audienceId)
+  private async setDefaultAudience(audienceId: string): Promise<void> {
+    const success: boolean = await this.vm.setDefaultAudience(audienceId)
     this.syncFromVm()
 
     promptAction.showToast({
@@ -332,8 +386,8 @@ struct AudiencePage {
     })
   }
 
-  private deleteAudience(audienceId: string): void {
-    const success: boolean = this.vm.deleteAudience(audienceId)
+  private async deleteAudience(audienceId: string): Promise<void> {
+    const success: boolean = await this.vm.deleteAudience(audienceId)
     this.syncFromVm()
 
     promptAction.showToast({

@@ -3,12 +3,9 @@ import {
   AudienceItemVO
 } from '../model/vo/user/AudiencePageVO'
 import { Audience } from '../model/entity/Audience'
-import { audienceMockList } from '../mock/user/AudienceMock'
 import { CertificateType } from '../model/enums/CertificateType'
-import { MaskUtil } from '../utils/MaskUtil'
-import { IdGenerator } from '../utils/IdGenerator'
+import { ApiClient } from '../network/ApiClient'
 import { AppStorageVersionUtil } from '../utils/AppStorageVersionUtil'
-import { UserDataUtil } from '../utils/UserDataUtil'
 
 export interface CreateAudienceRequest {
   realName: string
@@ -26,305 +23,136 @@ export interface UpdateAudienceRequest {
   isDefault: boolean
 }
 
-/**
- 获取观演人列表
- 获取观演人详情
- 新增观演人
- 修改观演人
- 删除观演人
- 设为默认观演人
- */
+interface BackendAudienceItemVO {
+  audienceId: number | string
+  realName?: string | null
+  certificateType?: string | null
+  maskedCertificateNo?: string | null
+  maskedPhone?: string | null
+  isDefault?: boolean | null
+}
+
+interface BackendAudienceDetailVO {
+  audienceId: number | string
+  realName?: string | null
+  certificateType?: string | null
+  certificateNo?: string | null
+  phone?: string | null
+  isDefault?: boolean | null
+}
+
+interface BackendAudienceListPageVO {
+  audiences: BackendAudienceItemVO[]
+}
+
+interface OperateResponse {
+  success: boolean
+}
+
+/** 观演人 Repository：从 SpringBoot 接口读写，不再使用 Mock。 */
 export class AudienceRepository {
-
-  /**
-   * 1. 获取观演人列表
-   */
-  getAudienceList(userId: string): AudienceListPageVO {
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    if (normalizedUserId.length === 0) {
-      const emptyResult: AudienceListPageVO = {
-        audiences: new Array<AudienceItemVO>()
-      }
-      return emptyResult
+  async getAudienceList(userId: string): Promise<AudienceListPageVO> {
+    if (userId.length === 0) {
+      return { audiences: [] }
     }
 
-    this.ensureSingleDefault(normalizedUserId)
+    const response: BackendAudienceListPageVO =
+      await ApiClient.get<BackendAudienceListPageVO>('/api/users/' + encodeURIComponent(userId) + '/audiences')
 
-    const userAudiences: Audience[] = this.getUserAudiences(normalizedUserId)
-    userAudiences.sort((a: Audience, b: Audience): number => {
-      return this.compareDefaultFirst(a.isDefault, b.isDefault)
-    })
-
-    const audiences: AudienceItemVO[] = []
-    userAudiences.forEach((item: Audience) => {
-      audiences.push(this.buildAudienceItemVO(item))
-    })
-
-    const result: AudienceListPageVO = {
-      audiences: audiences
+    return {
+      audiences: (response.audiences ?? []).map((item: BackendAudienceItemVO): AudienceItemVO => {
+        return {
+          audienceId: String(item.audienceId),
+          realName: item.realName ?? '',
+          certificateType: this.mapCertificateType(item.certificateType),
+          maskedCertificateNo: item.maskedCertificateNo ?? '',
+          maskedPhone: item.maskedPhone ?? '',
+          isDefault: item.isDefault === true
+        }
+      })
     }
-
-    return result
   }
 
-  /**
-   * 2. 获取观演人详情
-   */
-  getAudienceDetail(userId: string, audienceId: string): Audience | undefined {
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    const normalizedAudienceId: string = audienceId.trim()
-
-    if (normalizedUserId.length === 0 || normalizedAudienceId.length === 0) {
+  async getAudienceDetail(userId: string, audienceId: string): Promise<Audience | undefined> {
+    if (userId.length === 0 || audienceId.length === 0) {
       return undefined
     }
 
-    return this.findAudience(normalizedUserId, normalizedAudienceId)
+    const response: BackendAudienceDetailVO =
+      await ApiClient.get<BackendAudienceDetailVO>('/api/users/' + encodeURIComponent(userId) + '/audiences/' + encodeURIComponent(audienceId))
+
+    return this.mapAudienceDetail(userId, response)
   }
 
-  /**
-   * 3. 新增观演人
-   */
-  createAudience(userId: string, request: CreateAudienceRequest): Audience | undefined {
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    if (normalizedUserId.length === 0) {
+  async createAudience(userId: string, request: CreateAudienceRequest): Promise<Audience | undefined> {
+    if (userId.length === 0) {
       return undefined
     }
 
-    const realName: string = request.realName.trim()
-    const certificateNo: string = request.certificateNo.trim()
-    const phone: string = request.phone.trim()
+    const response: BackendAudienceDetailVO =
+      await ApiClient.post<BackendAudienceDetailVO>('/api/users/' + encodeURIComponent(userId) + '/audiences', request)
 
-    if (!UserDataUtil.isValidAudience(realName, request.certificateType, certificateNo, phone)) {
-      return undefined
-    }
-
-    if (this.hasSameCertificate(normalizedUserId, certificateNo)) {
-      return undefined
-    }
-
-    const shouldSetDefault: boolean = request.isDefault || this.getUserAudienceCount(normalizedUserId) === 0
-    if (shouldSetDefault) {
-      this.clearDefault(normalizedUserId)
-    }
-
-    const audience: Audience = {
-      audienceId: IdGenerator.createAudienceId(),
-      userId: normalizedUserId,
-      realName: realName,
-      certificateType: request.certificateType,
-      certificateNo: certificateNo,
-      phone: phone,
-      isDefault: shouldSetDefault
-    }
-
-    audienceMockList.push(audience)
-    this.ensureSingleDefault(normalizedUserId)
+    const audience: Audience = this.mapAudienceDetail(userId, response)
     AppStorageVersionUtil.bumpAudienceChangedVersion()
-
     return audience
   }
 
-  /**
-   * 4. 修改观演人
-   */
-  updateAudience(userId: string, audienceId: string, request: UpdateAudienceRequest): Audience | undefined {
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    const normalizedAudienceId: string = audienceId.trim()
-
-    if (normalizedUserId.length === 0 || normalizedAudienceId.length === 0) {
+  async updateAudience(userId: string, audienceId: string, request: UpdateAudienceRequest): Promise<Audience | undefined> {
+    if (userId.length === 0 || audienceId.length === 0) {
       return undefined
     }
 
-    const audience: Audience | undefined = this.findAudience(normalizedUserId, normalizedAudienceId)
-    if (audience === undefined) {
-      return undefined
-    }
+    const response: BackendAudienceDetailVO =
+      await ApiClient.put<BackendAudienceDetailVO>('/api/users/' + encodeURIComponent(userId) + '/audiences/' + encodeURIComponent(audienceId), request)
 
-    const realName: string = request.realName.trim()
-    const certificateNo: string = request.certificateNo.trim()
-    const phone: string = request.phone.trim()
-
-    if (!UserDataUtil.isValidAudience(realName, request.certificateType, certificateNo, phone)) {
-      return undefined
-    }
-
-    if (this.hasSameCertificate(normalizedUserId, certificateNo, normalizedAudienceId)) {
-      return undefined
-    }
-
-    if (request.isDefault) {
-      this.clearDefault(normalizedUserId)
-    }
-
-    audience.realName = realName
-    audience.certificateType = request.certificateType
-    audience.certificateNo = certificateNo
-    audience.phone = phone
-    audience.isDefault = request.isDefault
-
-    this.ensureSingleDefault(normalizedUserId)
+    const audience: Audience = this.mapAudienceDetail(userId, response)
     AppStorageVersionUtil.bumpAudienceChangedVersion()
-
     return audience
   }
 
-  /**
-   * 5. 删除观演人
-   */
-  deleteAudience(userId: string, audienceId: string): boolean {
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    const normalizedAudienceId: string = audienceId.trim()
-
-    if (normalizedUserId.length === 0 || normalizedAudienceId.length === 0) {
+  async deleteAudience(userId: string, audienceId: string): Promise<boolean> {
+    if (userId.length === 0 || audienceId.length === 0) {
       return false
     }
 
-    const index: number = audienceMockList.findIndex((item: Audience): boolean => {
-      return item.userId === normalizedUserId && item.audienceId === normalizedAudienceId
-    })
+    const response: OperateResponse =
+      await ApiClient.delete<OperateResponse>('/api/users/' + encodeURIComponent(userId) + '/audiences/' + encodeURIComponent(audienceId))
 
-    if (index < 0) {
+    if (response.success) AppStorageVersionUtil.bumpAudienceChangedVersion()
+    return response.success
+  }
+
+  async setDefaultAudience(userId: string, audienceId: string): Promise<boolean> {
+    if (userId.length === 0 || audienceId.length === 0) {
       return false
     }
 
-    const isDefault: boolean = audienceMockList[index].isDefault
-    audienceMockList.splice(index, 1)
+    const response: OperateResponse =
+      await ApiClient.put<OperateResponse>('/api/users/' + encodeURIComponent(userId) + '/audiences/' + encodeURIComponent(audienceId) + '/default')
 
-    if (isDefault) {
-      this.resetFirstAsDefault(normalizedUserId)
+    if (response.success) AppStorageVersionUtil.bumpAudienceChangedVersion()
+    return response.success
+  }
+
+  private mapCertificateType(certificateType: string | undefined | null): CertificateType {
+    if (certificateType === CertificateType.PASSPORT) {
+      return CertificateType.PASSPORT
     }
-
-    this.ensureSingleDefault(normalizedUserId)
-    AppStorageVersionUtil.bumpAudienceChangedVersion()
-    return true
-  }
-
-  /**
-   * 6. 设为默认观演人
-   */
-  setDefaultAudience(userId: string, audienceId: string): boolean {
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    const normalizedAudienceId: string = audienceId.trim()
-
-    if (normalizedUserId.length === 0 || normalizedAudienceId.length === 0) {
-      return false
+    if (certificateType === CertificateType.HK_MACAO_PASS) {
+      return CertificateType.HK_MACAO_PASS
     }
-
-    const audience: Audience | undefined = this.findAudience(normalizedUserId, normalizedAudienceId)
-    if (audience === undefined) {
-      return false
-    }
-
-    this.clearDefault(normalizedUserId)
-    audience.isDefault = true
-    this.ensureSingleDefault(normalizedUserId)
-    AppStorageVersionUtil.bumpAudienceChangedVersion()
-
-    return true
+    return CertificateType.ID_CARD
   }
 
-  private buildAudienceItemVO(item: Audience): AudienceItemVO {
-    const vo: AudienceItemVO = {
-      audienceId: item.audienceId,
-      realName: item.realName,
-      certificateType: item.certificateType,
-      maskedCertificateNo: MaskUtil.maskCertificateNo(item.certificateNo),
-      maskedPhone: MaskUtil.maskPhone(item.phone),
-      isDefault: item.isDefault
-    }
-
-    return vo
-  }
-
-  private getUserAudiences(userId: string): Audience[] {
-    const audiences: Audience[] = []
-    audienceMockList.forEach((item: Audience) => {
-      if (item.userId === userId) {
-        audiences.push(item)
-      }
-    })
-    return audiences
-  }
-
-  private getUserAudienceCount(userId: string): number {
-    let count: number = 0
-    audienceMockList.forEach((item: Audience) => {
-      if (item.userId === userId) {
-        count++
-      }
-    })
-    return count
-  }
-
-  private findAudience(userId: string, audienceId: string): Audience | undefined {
-    return audienceMockList.find((item: Audience): boolean => {
-      return item.userId === userId && item.audienceId === audienceId
-    })
-  }
-
-  private hasSameCertificate(userId: string, certificateNo: string, ignoreAudienceId: string = ''): boolean {
-    return audienceMockList.some((item: Audience): boolean => {
-      if (item.userId !== userId) {
-        return false
-      }
-
-      if (ignoreAudienceId.length > 0 && item.audienceId === ignoreAudienceId) {
-        return false
-      }
-
-      return item.certificateNo === certificateNo
-    })
-  }
-
-  private compareDefaultFirst(leftIsDefault: boolean, rightIsDefault: boolean): number {
-    if (leftIsDefault && !rightIsDefault) {
-      return -1
-    }
-
-    if (!leftIsDefault && rightIsDefault) {
-      return 1
-    }
-
-    return 0
-  }
-
-  private ensureSingleDefault(userId: string): void {
-    const userAudiences: Audience[] = this.getUserAudiences(userId)
-    if (userAudiences.length === 0) {
-      return
-    }
-
-    let activeDefaultAudienceId: string = ''
-    userAudiences.forEach((item: Audience) => {
-      if (item.isDefault) {
-        activeDefaultAudienceId = item.audienceId
-      }
-    })
-
-    if (activeDefaultAudienceId.length === 0) {
-      activeDefaultAudienceId = userAudiences[0].audienceId
-    }
-
-    userAudiences.forEach((item: Audience) => {
-      item.isDefault = item.audienceId === activeDefaultAudienceId
-    })
-  }
-
-  private clearDefault(userId: string): void {
-    audienceMockList.forEach((item: Audience) => {
-      if (item.userId === userId) {
-        item.isDefault = false
-      }
-    })
-  }
-
-  private resetFirstAsDefault(userId: string): void {
-    const first: Audience | undefined = audienceMockList.find((item: Audience): boolean => {
-      return item.userId === userId
-    })
-
-    if (first !== undefined) {
-      first.isDefault = true
+  private mapAudienceDetail(userId: string, raw: BackendAudienceDetailVO): Audience {
+    return {
+      audienceId: String(raw.audienceId),
+      userId: userId,
+      realName: raw.realName ?? '',
+      certificateType: this.mapCertificateType(raw.certificateType),
+      certificateNo: raw.certificateNo ?? '',
+      phone: raw.phone ?? '',
+      isDefault: raw.isDefault === true
     }
   }
 }

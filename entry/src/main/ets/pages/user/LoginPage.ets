@@ -149,14 +149,14 @@ struct LoginPage {
     return regExp.test(this.phone) && this.smsCode.length > 0
   }
 
-  private sendCode(): void {
-    const success: boolean = this.vm.sendSmsCode(this.phone)
+  private async sendCode(): Promise<void> {
+    const success: boolean = await this.vm.sendSmsCode(this.phone)
     promptAction.showToast({ message: success ? '验证码已发送：123456' : this.vm.errorMessage })
     this.refreshPage()
   }
 
-  private login(): void {
-    const success: boolean = this.vm.login(this.phone, this.smsCode)
+  private async login(): Promise<void> {
+    const success: boolean = await this.vm.login(this.phone, this.smsCode)
     if (!success) {
       promptAction.showToast({ message: this.vm.errorMessage })
       this.refreshPage()

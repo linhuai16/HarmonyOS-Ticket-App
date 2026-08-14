@@ -31,7 +31,7 @@ export class HomeViewModel {
     this.currentCityName = this.cityRepository.getCurrentCity()
   }
 
-  loadHome(): void {
+  async loadHome(): Promise<void> {
     if (this.isLoading) {
       return
     }
@@ -43,18 +43,18 @@ export class HomeViewModel {
     const cityName: string = this.cityRepository.getCurrentCity()
     this.currentCityName = cityName
 
-    const pageVO: HomePageVO = this.homeRepository.getHomeIndex(
-      cityName,
-      this.pageSize,
-      this.offset
-    )
-
-    this.applyHomePageVO(pageVO)
-    this.offset = this.recommendList.length
-    this.isLoading = false
+    try {
+      const pageVO: HomePageVO = await this.homeRepository.getHomeIndex(cityName, this.pageSize, this.offset)
+      this.applyHomePageVO(pageVO)
+      this.offset = this.recommendList.length
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '首页数据加载失败'
+    } finally {
+      this.isLoading = false
+    }
   }
 
-  refreshHome(): void {
+  async refreshHome(): Promise<void> {
     if (this.isRefreshing) {
       return
     }
@@ -66,18 +66,18 @@ export class HomeViewModel {
     const cityName: string = this.cityRepository.getCurrentCity()
     this.currentCityName = cityName
 
-    const pageVO: HomePageVO = this.homeRepository.getHomeIndex(
-      cityName,
-      this.pageSize,
-      this.offset
-    )
-
-    this.applyHomePageVO(pageVO)
-    this.offset = this.recommendList.length
-    this.isRefreshing = false
+    try {
+      const pageVO: HomePageVO = await this.homeRepository.getHomeIndex(cityName, this.pageSize, this.offset)
+      this.applyHomePageVO(pageVO)
+      this.offset = this.recommendList.length
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '首页刷新失败'
+    } finally {
+      this.isRefreshing = false
+    }
   }
 
-  loadMore(): void {
+  async loadMore(): Promise<void> {
     if (this.isLoading || !this.hasMore) {
       return
     }
@@ -85,27 +85,31 @@ export class HomeViewModel {
     this.isLoading = true
     this.errorMessage = ''
 
-    const pageVO: HomePageVO = this.homeRepository.getHomeIndex(
-      this.currentCityName,
-      this.pageSize,
-      this.offset
-    )
+    try {
+      const pageVO: HomePageVO = await this.homeRepository.getHomeIndex(
+        this.currentCityName,
+        this.pageSize,
+        this.offset
+      )
 
-    this.recommendList = this.recommendList.concat(pageVO.recommendList)
-    this.hasMore = pageVO.hasMore
-    this.offset = this.recommendList.length
-
-    this.isLoading = false
+      this.recommendList = this.recommendList.concat(pageVO.recommendList)
+      this.hasMore = pageVO.hasMore
+      this.offset = this.recommendList.length
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '加载更多失败'
+    } finally {
+      this.isLoading = false
+    }
   }
 
-  changeCity(cityName: string): void {
+  async changeCity(cityName: string): Promise<void> {
     if (cityName.length === 0) {
       return
     }
 
     this.cityRepository.saveCurrentCity(cityName)
     this.currentCityName = cityName
-    this.loadHome()
+    await this.loadHome()
   }
 
   clearError(): void {

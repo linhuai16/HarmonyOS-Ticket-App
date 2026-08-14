@@ -35,48 +35,106 @@ struct OrderDetailPage {
   @State orderId: string = ''
   @State orderDetailVO: OrderDetailVO | undefined = undefined
   @State errorMessage: string = ''
+  @State isLoading: boolean = false
   @State showPayDialog: boolean = false
   @State selectedPayMethod: PayMethod = PayMethod.WECHAT
   @State payRemainText: string = '00:00'
   @State pageVersion: number = 0
+  @State refundProgressStatusText: string = ''
+  @State refundProgressApplyTime: string = ''
+  @State refundProgressFailReason: string = ''
+  @State isRefreshingPage: boolean = false
+  @State canViewTicketValue: boolean = false
+  @State isTicketingValue: boolean = false
+  @State canRefundValue: boolean = false
+  @State ticketDetailActionText: string = '查看电子票'
   @StorageLink('order_changed_version') @Watch('onOrderChanged') orderChangedVersion: number = 0
+  @StorageLink('refund_changed_version') @Watch('onOrderRelatedChanged') refundChangedVersion: number = 0
+  @StorageLink('ticket_changed_version') @Watch('onOrderRelatedChanged') ticketChangedVersion: number = 0
 
   private payTimerId: number = -1
+  private stateRefreshTimerId: number = -1
+  private isReloadingPage: boolean = false
   private isRefreshingExpiredOrder: boolean = false
+  private isLocalMutation: boolean = false
+  private routeUserId: string = ''
+  private routeOrderId: string = ''
+  private isPageVisible: boolean = false
+  private pendingExternalRefresh: boolean = false
 
   aboutToAppear(): void {
     WindowImmersiveUtil.applyLight(this)
+    this.isPageVisible = true
     this.loadPageData()
   }
 
   aboutToDisappear(): void {
     this.stopPayCountdown()
+    this.stopStateRefreshTimer()
   }
 
   onPageShow(): void {
     WindowImmersiveUtil.applyLight(this)
+    this.isPageVisible = true
+    this.pendingExternalRefresh = false
     this.reloadCurrentOrderDetail()
+  }
+
+  onPageHide(): void {
+    this.isPageVisible = false
   }
 
   private onOrderChanged(): void {
+    if (this.isLocalMutation) return
+    if (!this.isPageVisible) {
+      this.pendingExternalRefresh = true
+      return
+    }
     this.reloadCurrentOrderDetail()
   }
 
-  private reloadCurrentOrderDetail(): void {
-    if (this.userId.length === 0 || this.orderId.length === 0) {
+  private onOrderRelatedChanged(): void {
+    if (this.isLocalMutation) return
+    if (!this.isPageVisible) {
+      this.pendingExternalRefresh = true
       return
     }
+    this.reloadCurrentOrderDetail()
+  }
 
-    this.vm.reload().then(() => {
+  private async reloadCurrentOrderDetail(): Promise<boolean> {
+    if (this.userId.length === 0 || this.orderId.length === 0 || this.isReloadingPage) {
+      return false
+    }
+
+    this.isReloadingPage = true
+    try {
+      await this.vm.reload()
       this.syncFromVm()
       this.startPayCountdownIfNeeded()
-    })
+      this.startStateRefreshTimerIfNeeded()
+    } finally {
+      this.isReloadingPage = false
+    }
+    return true
+  }
+
+  private async manualRefreshPage(): Promise<void> {
+    if (this.isRefreshingPage) return
+    this.isRefreshingPage = true
+    const refreshed: boolean = await this.reloadCurrentOrderDetail()
+    this.isRefreshingPage = false
+    if (!refreshed) {
+      promptAction.showToast({ message: '正在刷新，请稍候' })
+      return
+    }
+    promptAction.showToast({ message: this.errorMessage.length > 0 ? this.errorMessage : '已获取最新订单状态' })
   }
 
   private async loadPageData(): Promise<void> {
-    const params = router.getParams() as OrderDetailRouteParams
+    const params: OrderDetailRouteParams = this.getRouteParams()
     const userId: string = this.resolveUserId(params.userId)
-    const orderId: string = params.orderId ?? ''
+    const orderId: string = this.resolveOrderId(params.orderId)
 
     if (userId.length === 0) {
       this.errorMessage = '请先登录后查看订单详情'
@@ -94,17 +152,68 @@ struct OrderDetailPage {
       return
     }
 
-    await this.vm.loadPage(userId, orderId)
-    this.syncFromVm()
-    this.startPayCountdownIfNeeded()
+    try {
+      this.isLoading = true
+      this.errorMessage = ''
+      this.refreshPage()
+      AppStorage.setOrCreate('order_detail_user_id', userId)
+      AppStorage.setOrCreate('order_detail_order_id', orderId)
+      await this.vm.loadPage(userId, orderId)
+      this.syncFromVm()
+      this.startPayCountdownIfNeeded()
+      this.startStateRefreshTimerIfNeeded()
+    } catch (error) {
+      this.isLoading = false
+      this.errorMessage = error instanceof Error ? error.message : '订单详情加载失败'
+      this.orderDetailVO = undefined
+      this.refreshPage()
+    }
+  }
+
+  private getRouteParams(): OrderDetailRouteParams {
+    const rawParams: OrderDetailRouteParams | undefined = router.getParams() as OrderDetailRouteParams | undefined
+
+    if (rawParams !== undefined && rawParams !== null) {
+      if (rawParams.userId !== undefined && String(rawParams.userId).length > 0) {
+        this.routeUserId = String(rawParams.userId)
+      }
+      if (rawParams.orderId !== undefined && String(rawParams.orderId).length > 0) {
+        this.routeOrderId = String(rawParams.orderId)
+      }
+    }
+
+    return {
+      userId: this.routeUserId,
+      orderId: this.routeOrderId
+    }
   }
 
   private resolveUserId(routeUserId?: string): string {
-    if (routeUserId !== undefined && routeUserId.length > 0) {
-      return routeUserId
+    const normalizedRouteUserId: string = (routeUserId ?? '').trim()
+    if (normalizedRouteUserId.length > 0) {
+      return normalizedRouteUserId
     }
 
-    return this.userRepository.getCurrentUserId()
+    const storageUserId: string | undefined = AppStorage.get<string>('order_detail_user_id')
+    if (storageUserId !== undefined && storageUserId.trim().length > 0) {
+      return storageUserId.trim()
+    }
+
+    return this.userRepository.getCurrentUserId().trim()
+  }
+
+  private resolveOrderId(routeOrderId?: string): string {
+    const normalizedRouteOrderId: string = (routeOrderId ?? '').trim()
+    if (normalizedRouteOrderId.length > 0) {
+      return normalizedRouteOrderId
+    }
+
+    const storageOrderId: string | undefined = AppStorage.get<string>('order_detail_order_id')
+    if (storageOrderId !== undefined && storageOrderId.trim().length > 0) {
+      return storageOrderId.trim()
+    }
+
+    return ''
   }
 
   build() {
@@ -113,16 +222,18 @@ struct OrderDetailPage {
         this.RefreshMarker()
         this.TopBar()
 
-        if (this.orderDetailVO === undefined) {
+        if (this.orderDetailVO === undefined && this.isLoading) {
+          this.LoadingArea('正在加载订单详情...')
+        } else if (this.orderDetailVO === undefined) {
           this.EmptyArea()
         } else {
           Scroll() {
             Column() {
-              this.StatusArea(this.orderDetailVO)
-              this.PerformanceArea(this.orderDetailVO)
-              this.AudienceArea(this.orderDetailVO)
-              this.DeliveryArea(this.orderDetailVO)
-              this.DetailInfoArea(this.orderDetailVO)
+              this.StatusArea()
+              this.PerformanceArea()
+              this.AudienceArea()
+              this.DeliveryArea()
+              this.DetailInfoArea()
               this.ActionArea()
               Blank().height(24)
             }
@@ -179,6 +290,16 @@ struct OrderDetailPage {
         .margin({ left: 4 })
 
       Blank()
+
+      Text(this.isRefreshingPage ? '刷新中' : '刷新')
+        .fontSize(14)
+        .fontColor(this.isRefreshingPage ? '#BBBBBB' : '#E33B3B')
+        .height(44)
+        .padding({ left: 10, right: 4 })
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          if (!this.isRefreshingPage) this.manualRefreshPage()
+        })
     }
     .width('100%')
     .height(52)
@@ -187,11 +308,17 @@ struct OrderDetailPage {
   }
 
   @Builder
-  private EmptyArea() {
+  private LoadingArea(message: string) {
     Column() {
-      Text(this.errorMessage.length > 0 ? this.errorMessage : '订单详情不存在')
-        .fontSize(15)
+      LoadingProgress()
+        .width(32)
+        .height(32)
+        .color('#E33B3B')
+
+      Text(message)
+        .fontSize(14)
         .fontColor('#999999')
+        .margin({ top: 12 })
     }
     .width('100%')
     .height('100%')
@@ -199,21 +326,35 @@ struct OrderDetailPage {
   }
 
   @Builder
-  private StatusArea(vo: OrderDetailVO) {
+  private EmptyArea() {
     Column() {
-      Text(this.getOrderStatusText(vo.orderStatus))
+      Text(this.errorMessage.length > 0 ? this.errorMessage : '订单详情不存在')
+        .fontSize(15)
+        .fontColor(this.errorMessage.length > 0 ? '#E33B3B' : '#999999')
+        .textAlign(TextAlign.Center)
+        .padding({ left: 24, right: 24 })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  private StatusArea() {
+    Column() {
+      Text(this.getOrderStatusText((this.orderDetailVO as OrderDetailVO).orderStatus))
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor('#FFFFFF')
         .width('100%')
 
-      Text(this.getOrderStatusTip(vo))
+      Text(this.getOrderStatusTip(this.orderDetailVO as OrderDetailVO))
         .fontSize(13)
         .fontColor('#FFFFFF')
         .margin({ top: 8 })
         .width('100%')
 
-      if (vo.orderStatus === OrderStatus.WAIT_PAY) {
+      if ((this.orderDetailVO as OrderDetailVO).orderStatus === OrderStatus.WAIT_PAY) {
         Row() {
           Button('取消订单')
             .height(38)
@@ -250,16 +391,16 @@ struct OrderDetailPage {
   }
 
   @Builder
-  private PerformanceArea(vo: OrderDetailVO) {
+  private PerformanceArea() {
     Row() {
-      Image(MediaResourceUtil.getMedia(vo.posterUrl))
+      Image(MediaResourceUtil.getMedia((this.orderDetailVO as OrderDetailVO).posterUrl))
         .width(86)
         .height(116)
         .objectFit(ImageFit.Cover)
         .borderRadius(8)
 
       Column() {
-        Text(vo.projectTitle)
+        Text((this.orderDetailVO as OrderDetailVO).projectTitle)
           .fontSize(16)
           .fontWeight(FontWeight.Bold)
           .fontColor('#222222')
@@ -267,19 +408,19 @@ struct OrderDetailPage {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
 
-        Text(vo.startTime)
+        Text((this.orderDetailVO as OrderDetailVO).startTime)
           .fontSize(13)
           .fontColor('#666666')
           .margin({ top: 8 })
           .width('100%')
 
-        Text(vo.venueName)
+        Text((this.orderDetailVO as OrderDetailVO).venueName)
           .fontSize(13)
           .fontColor('#666666')
           .margin({ top: 4 })
           .width('100%')
 
-        ForEach(vo.orderItems, (item: OrderDetailItemVO) => {
+        ForEach((this.orderDetailVO as OrderDetailVO).orderItems, (item: OrderDetailItemVO) => {
           Text(item.skuName + ' ￥' + item.unitPrice + ' x ' + item.quantity)
             .fontSize(13)
             .fontColor('#333333')
@@ -299,7 +440,7 @@ struct OrderDetailPage {
   }
 
   @Builder
-  private AudienceArea(vo: OrderDetailVO) {
+  private AudienceArea() {
     Column() {
       Text('观演人信息')
         .fontSize(17)
@@ -307,7 +448,7 @@ struct OrderDetailPage {
         .fontColor('#222222')
         .width('100%')
 
-      ForEach(vo.audiences, (item: OrderDetailAudienceVO) => {
+      ForEach((this.orderDetailVO as OrderDetailVO).audiences, (item: OrderDetailAudienceVO) => {
         Column() {
           Row() {
             Text(item.realName)
@@ -354,7 +495,7 @@ struct OrderDetailPage {
   }
 
   @Builder
-  private DeliveryArea(vo: OrderDetailVO) {
+  private DeliveryArea() {
     Column() {
       Text('配送方式')
         .fontSize(17)
@@ -362,10 +503,18 @@ struct OrderDetailPage {
         .fontColor('#222222')
         .width('100%')
 
-      this.InfoRow('配送方式', vo.deliveryType === DeliveryType.PAPER_TICKET ? '实体票/快递票' : '电子票')
-
-      if (vo.deliveryType === DeliveryType.PAPER_TICKET && vo.address !== undefined) {
-        this.AddressInfo(vo.address)
+      if ((this.orderDetailVO as OrderDetailVO).deliveryType === DeliveryType.PAPER_TICKET && (this.orderDetailVO as OrderDetailVO).deliveryMode === 'SELF_PICKUP') {
+        this.InfoRow('配送方式', '纸质票 · 现场取票')
+        this.InfoRow('取票地点', '演出场馆')
+        this.InfoRow('场馆', (this.orderDetailVO as OrderDetailVO).venueName)
+        this.InfoRow('场馆地址', (this.orderDetailVO as OrderDetailVO).venueAddress.length > 0 ? (this.orderDetailVO as OrderDetailVO).venueAddress : '-')
+      } else if ((this.orderDetailVO as OrderDetailVO).deliveryType === DeliveryType.PAPER_TICKET) {
+        this.InfoRow('配送方式', '纸质票 · 快递配送')
+        if ((this.orderDetailVO as OrderDetailVO).address !== undefined) {
+          this.AddressInfo()
+        }
+      } else {
+        this.InfoRow('配送方式', '电子票')
       }
     }
     .width('100%')
@@ -376,13 +525,13 @@ struct OrderDetailPage {
   }
 
   @Builder
-  private AddressInfo(address: OrderDetailAddressVO) {
+  private AddressInfo() {
     Column() {
-      Text(address.receiverName + '  ' + address.receiverPhone)
+      Text(this.currentOrderDetailAddress().receiverName + '  ' + this.currentOrderDetailAddress().receiverPhone)
         .fontSize(14)
         .fontColor('#222222')
         .width('100%')
-      Text(address.fullAddress)
+      Text(this.currentOrderDetailAddress().fullAddress)
         .fontSize(13)
         .fontColor('#666666')
         .margin({ top: 4 })
@@ -396,7 +545,7 @@ struct OrderDetailPage {
   }
 
   @Builder
-  private DetailInfoArea(vo: OrderDetailVO) {
+  private DetailInfoArea() {
     Column() {
       Text('订单明细')
         .fontSize(17)
@@ -404,44 +553,53 @@ struct OrderDetailPage {
         .fontColor('#222222')
         .width('100%')
 
-      this.InfoRow('订单编号', vo.orderNo)
-      this.InfoRow('订单状态', this.getOrderStatusText(vo.orderStatus))
-      this.InfoRow('下单时间', vo.createTime)
-      if (vo.orderStatus === OrderStatus.WAIT_PAY && vo.payExpireTime !== undefined) {
-        this.InfoRow('支付截止时间', vo.payExpireTime)
+      this.InfoRow('订单编号', (this.orderDetailVO as OrderDetailVO).orderNo)
+      this.InfoRow('订单状态', this.getOrderStatusText((this.orderDetailVO as OrderDetailVO).orderStatus))
+      this.InfoRow('下单时间', (this.orderDetailVO as OrderDetailVO).createTime)
+      if ((this.orderDetailVO as OrderDetailVO).orderStatus === OrderStatus.WAIT_PAY && (this.orderDetailVO as OrderDetailVO).payExpireTime !== undefined) {
+        this.InfoRow('支付截止时间', (this.orderDetailVO as OrderDetailVO).payExpireTime ?? '')
         this.InfoRow('支付剩余时间', this.payRemainText)
       }
 
-      if (vo.payTime !== undefined) {
-        this.InfoRow('支付方式', this.getPayMethodText(vo.payMethod))
-        this.InfoRow('支付时间', vo.payTime)
+      if ((this.orderDetailVO as OrderDetailVO).payTime !== undefined) {
+        this.InfoRow('支付方式', this.getPayMethodText((this.orderDetailVO as OrderDetailVO).payMethod))
+        this.InfoRow('支付时间', (this.orderDetailVO as OrderDetailVO).payTime ?? '')
       }
-      if (vo.ticketIssuedTime !== undefined) {
-        this.InfoRow('电子票生成时间', vo.ticketIssuedTime)
+      if ((this.orderDetailVO as OrderDetailVO).ticketIssuedTime !== undefined) {
+        this.InfoRow('电子票生成时间', (this.orderDetailVO as OrderDetailVO).ticketIssuedTime ?? '')
       }
-      if (vo.cancelTime !== undefined) {
-        this.InfoRow('取消时间', vo.cancelTime)
+      if ((this.orderDetailVO as OrderDetailVO).cancelTime !== undefined) {
+        this.InfoRow('取消时间', (this.orderDetailVO as OrderDetailVO).cancelTime ?? '')
       }
-      if (vo.finishTime !== undefined) {
-        this.InfoRow('完成时间', vo.finishTime)
+      if ((this.orderDetailVO as OrderDetailVO).finishTime !== undefined) {
+        this.InfoRow('完成时间', (this.orderDetailVO as OrderDetailVO).finishTime ?? '')
       }
-      if (vo.refundTime !== undefined) {
-        this.InfoRow('退款完成时间', vo.refundTime)
+      if ((this.orderDetailVO as OrderDetailVO).refundTime !== undefined) {
+        this.InfoRow('退款完成时间', (this.orderDetailVO as OrderDetailVO).refundTime ?? '')
       }
-      if (vo.refundAmount !== undefined && vo.orderStatus === OrderStatus.REFUNDING) {
-        this.InfoRow('预计退款金额', '￥' + vo.refundAmount)
+      if ((this.orderDetailVO as OrderDetailVO).refundAmount !== undefined && (this.orderDetailVO as OrderDetailVO).orderStatus === OrderStatus.REFUNDING) {
+        this.InfoRow('预计退款金额', '￥' + (this.orderDetailVO as OrderDetailVO).refundAmount)
       }
-      if (vo.refundAmount !== undefined && vo.orderStatus === OrderStatus.REFUND_SUCCESS) {
-        this.InfoRow('退款金额', '￥' + vo.refundAmount)
+      if ((this.orderDetailVO as OrderDetailVO).refundAmount !== undefined && (this.orderDetailVO as OrderDetailVO).orderStatus === OrderStatus.REFUND_SUCCESS) {
+        this.InfoRow('退款金额', '￥' + (this.orderDetailVO as OrderDetailVO).refundAmount)
       }
-      if (vo.refundFeeAmount !== undefined) {
-        this.InfoRow('手续费', '￥' + vo.refundFeeAmount)
+      if ((this.orderDetailVO as OrderDetailVO).refundFeeAmount !== undefined) {
+        this.InfoRow('手续费', '￥' + (this.orderDetailVO as OrderDetailVO).refundFeeAmount)
+      }
+      if (this.refundProgressStatusText.length > 0) {
+        this.InfoRow('退款进度', this.refundProgressStatusText)
+      }
+      if (this.refundProgressApplyTime.length > 0) {
+        this.InfoRow('退款申请时间', this.refundProgressApplyTime)
+      }
+      if (this.refundProgressFailReason.length > 0) {
+        this.InfoRow('退款说明', this.refundProgressFailReason)
       }
 
-      this.InfoRow('订单总额', '￥' + vo.totalAmount)
-      this.InfoRow('服务费', '￥' + (vo.serviceFee ?? 0))
-      this.InfoRow('配送费', '￥' + (vo.deliveryFee ?? 0))
-      this.InfoRow(vo.orderStatus === OrderStatus.WAIT_PAY ? '待支付金额' : '实付金额', '￥' + vo.payAmount)
+      this.InfoRow('订单总额', '￥' + (this.orderDetailVO as OrderDetailVO).totalAmount)
+      this.InfoRow('服务费', '￥' + ((this.orderDetailVO as OrderDetailVO).serviceFee ?? 0))
+      this.InfoRow('配送费', '￥' + ((this.orderDetailVO as OrderDetailVO).deliveryFee ?? 0))
+      this.InfoRow((this.orderDetailVO as OrderDetailVO).orderStatus === OrderStatus.WAIT_PAY ? '待支付金额' : '实付金额', '￥' + (this.orderDetailVO as OrderDetailVO).payAmount)
     }
     .width('100%')
     .padding(12)
@@ -455,8 +613,8 @@ struct OrderDetailPage {
     Row() {
       Blank()
 
-      if (this.vm.canViewTicket()) {
-        Button('查看电子票')
+      if (this.canViewTicketValue) {
+        Button(this.ticketDetailActionText)
           .height(38)
           .fontSize(14)
           .fontColor('#FFFFFF')
@@ -464,14 +622,14 @@ struct OrderDetailPage {
           .onClick(() => {
             this.jumpTicketDetail()
           })
-      } else if (this.vm.isTicketing()) {
+      } else if (this.isTicketingValue) {
         Button('出票中')
           .height(38)
           .fontSize(14)
           .enabled(false)
       }
 
-      if (this.vm.canRefund()) {
+      if (this.canRefundValue) {
         Button('申请退款')
           .height(38)
           .fontSize(14)
@@ -517,8 +675,10 @@ struct OrderDetailPage {
   }
 
   private async confirmPay(): Promise<void> {
+    this.isLocalMutation = true
     const success: boolean = await this.vm.payOrder(this.selectedPayMethod)
     this.syncFromVm()
+    this.isLocalMutation = false
 
     if (!success) {
       promptAction.showToast({ message: this.errorMessage.length > 0 ? this.errorMessage : '支付失败' })
@@ -547,9 +707,11 @@ struct OrderDetailPage {
   }
 
   private async cancelOrder(): Promise<void> {
+    this.isLocalMutation = true
     const success: boolean = await this.vm.cancelOrder()
 
     this.syncFromVm()
+    this.isLocalMutation = false
 
     if (success) {
       this.showPayDialog = false
@@ -565,6 +727,14 @@ struct OrderDetailPage {
     })
   }
 
+  private getTicketDetailActionText(): string {
+    const vo: OrderDetailVO | undefined = this.orderDetailVO
+    if (vo?.deliveryType === DeliveryType.PAPER_TICKET) {
+      return vo.deliveryMode === 'EXPRESS' ? '查看物流' : '查看取票信息'
+    }
+    return '查看电子票'
+  }
+
   private jumpTicketDetail(): void {
     const params: TicketDetailJumpParams | undefined = this.vm.buildTicketDetailJumpParams()
     if (params === undefined) {
@@ -578,7 +748,31 @@ struct OrderDetailPage {
     if (params === undefined) {
       return
     }
+
+    // ArkUI 路由参数在部分页面切换/刷新时偶发取不到。
+    // 进入退款申请页前先写入 AppStorage，退款页再做兜底读取。
+    AppStorage.setOrCreate('refund_apply_user_id', params.userId)
+    AppStorage.setOrCreate('refund_apply_order_id', params.orderId)
+
     router.pushUrl({ url: 'pages/order/RefundApplyPage', params: params })
+  }
+
+  private startStateRefreshTimerIfNeeded(): void {
+    this.stopStateRefreshTimer()
+    const status: OrderStatus | undefined = this.orderDetailVO?.orderStatus
+    if (status !== OrderStatus.WAIT_PAY && status !== OrderStatus.WAIT_USE && status !== OrderStatus.REFUNDING) {
+      return
+    }
+    this.stateRefreshTimerId = setInterval(() => {
+      this.reloadCurrentOrderDetail()
+    }, 15000)
+  }
+
+  private stopStateRefreshTimer(): void {
+    if (this.stateRefreshTimerId >= 0) {
+      clearInterval(this.stateRefreshTimerId)
+      this.stateRefreshTimerId = -1
+    }
   }
 
   private startPayCountdownIfNeeded(): void {
@@ -669,6 +863,13 @@ struct OrderDetailPage {
     return ''
   }
 
+  private getRefundProgressText(status: string): string {
+    if (status === 'REFUNDING') return '退款处理中'
+    if (status === 'REFUND_SUCCESS') return '退款成功'
+    if (status === 'REFUND_FAILED') return '退款失败'
+    return status
+  }
+
   private getPayMethodText(method: PayMethod | undefined): string {
     if (method === PayMethod.ALIPAY) return '支付宝'
     if (method === PayMethod.WECHAT) return '微信'
@@ -676,15 +877,57 @@ struct OrderDetailPage {
     return '-'
   }
 
+  private currentOrderDetailAddress(): OrderDetailAddressVO {
+    return (this.orderDetailVO as OrderDetailVO).address as OrderDetailAddressVO
+  }
+
   private syncFromVm(): void {
     this.userId = this.vm.userId
     this.orderId = this.vm.orderId
-    this.orderDetailVO = this.vm.orderDetailVO
+    this.orderDetailVO = this.cloneOrderDetail(this.vm.orderDetailVO)
     this.errorMessage = this.vm.errorMessage
+    this.isLoading = this.vm.isLoading
+    this.canViewTicketValue = this.orderDetailVO?.ticketActionType === 'VIEW_TICKET'
+    this.isTicketingValue = this.orderDetailVO?.ticketActionType === 'TICKETING'
+    this.canRefundValue = this.orderDetailVO?.orderStatus === OrderStatus.WAIT_USE
+    this.ticketDetailActionText = this.getTicketDetailActionText()
+    const progress = this.vm.refundProgress
+    this.refundProgressStatusText = progress === undefined ? '' : this.getRefundProgressText(progress.refundStatus as string)
+    this.refundProgressApplyTime = progress?.applyTime ?? ''
+    this.refundProgressFailReason = progress?.failReason ?? ''
     if (this.orderDetailVO !== undefined && this.orderDetailVO.payExpireTime !== undefined) {
       this.payRemainText = this.buildRemainText(this.orderDetailVO.payExpireTime)
     }
+    if (this.orderDetailVO !== undefined) {
+      console.info('[OrderDetailPage] uiSnapshot orderId=' + this.orderDetailVO.orderId +
+        ', status=' + String(this.orderDetailVO.orderStatus))
+    }
     this.refreshPage()
+  }
+
+
+  private cloneOrderDetail(source: OrderDetailVO | undefined): OrderDetailVO | undefined {
+    if (source === undefined) return undefined
+    return {
+      orderId: source.orderId, orderNo: source.orderNo, orderStatus: source.orderStatus,
+      posterUrl: source.posterUrl, categoryName: source.categoryName, projectTitle: source.projectTitle,
+      startTime: source.startTime, venueName: source.venueName, venueAddress: source.venueAddress,
+      orderItems: source.orderItems.map((item: OrderDetailItemVO): OrderDetailItemVO => {
+        const cloned: OrderDetailItemVO = { skuName: item.skuName, unitPrice: item.unitPrice, quantity: item.quantity, subtotalAmount: item.subtotalAmount }
+        return cloned
+      }),
+      audiences: source.audiences.map((item: OrderDetailAudienceVO): OrderDetailAudienceVO => {
+        const cloned: OrderDetailAudienceVO = { realName: item.realName, maskedCertificateNo: item.maskedCertificateNo, maskedPhone: item.maskedPhone }
+        return cloned
+      }),
+      deliveryType: source.deliveryType, deliveryMode: source.deliveryMode,
+      address: source.address === undefined ? undefined : { receiverName: source.address.receiverName, receiverPhone: source.address.receiverPhone, fullAddress: source.address.fullAddress },
+      createTime: source.createTime, payExpireTime: source.payExpireTime, payTime: source.payTime,
+      ticketIssuedTime: source.ticketIssuedTime, cancelTime: source.cancelTime, finishTime: source.finishTime, refundTime: source.refundTime,
+      totalAmount: source.totalAmount, serviceFee: source.serviceFee, deliveryFee: source.deliveryFee, payAmount: source.payAmount, payMethod: source.payMethod,
+      ticketActionType: source.ticketActionType, defaultTicketId: source.defaultTicketId,
+      refundAmount: source.refundAmount, refundFeeAmount: source.refundFeeAmount, projectId: source.projectId, sessionId: source.sessionId
+    }
   }
 
   private refreshPage(): void {

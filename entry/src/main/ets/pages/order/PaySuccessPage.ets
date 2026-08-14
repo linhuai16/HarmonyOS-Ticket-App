@@ -30,10 +30,27 @@ struct PaySuccessPage {
   @State paySuccessVO: PaySuccessPageVO | undefined = undefined
   @State errorMessage: string = ''
   @State routeUserId: string = ''
+  @StorageLink('order_changed_version') @Watch('onOrderChanged') orderChangedVersion: number = 0
+  @StorageLink('ticket_changed_version') @Watch('onOrderChanged') ticketChangedVersion: number = 0
 
   aboutToAppear(): void {
     WindowImmersiveUtil.applyLight(this)
     this.loadPageData()
+  }
+
+  onPageShow(): void {
+    WindowImmersiveUtil.applyLight(this)
+    this.reloadPaySuccess()
+  }
+
+  private onOrderChanged(): void {
+    this.reloadPaySuccess()
+  }
+
+  private async reloadPaySuccess(): Promise<void> {
+    if (this.vm.userId.length === 0 || this.vm.orderId.length === 0) return
+    await this.vm.reload()
+    this.syncFromVm()
   }
 
   onBackPress(): boolean {
@@ -79,9 +96,9 @@ struct PaySuccessPage {
       } else {
         Scroll() {
           Column() {
-            this.SuccessHeader(this.paySuccessVO)
-            this.PerformanceCard(this.paySuccessVO)
-            this.OrderInfoCard(this.paySuccessVO)
+            this.SuccessHeader()
+            this.PerformanceCard()
+            this.OrderInfoCard()
             Blank().height(24)
           }
           .width('100%')
@@ -89,7 +106,7 @@ struct PaySuccessPage {
         }
         .layoutWeight(1)
 
-        this.BottomButtons(this.paySuccessVO)
+        this.BottomButtons()
       }
     }
     .width('100%')
@@ -139,7 +156,7 @@ struct PaySuccessPage {
   }
 
   @Builder
-  private SuccessHeader(pageVO: PaySuccessPageVO) {
+  private SuccessHeader() {
     Column() {
       Text('支付成功')
         .fontSize(24)
@@ -151,7 +168,7 @@ struct PaySuccessPage {
         .fontColor('#666666')
         .margin({ top: 8 })
 
-      Text('￥' + pageVO.payAmount)
+      Text('￥' + (this.paySuccessVO as PaySuccessPageVO).payAmount)
         .fontSize(28)
         .fontWeight(FontWeight.Bold)
         .fontColor('#E33B3B')
@@ -165,16 +182,16 @@ struct PaySuccessPage {
   }
 
   @Builder
-  private PerformanceCard(pageVO: PaySuccessPageVO) {
+  private PerformanceCard() {
     Row() {
       Stack({ alignContent: Alignment.TopStart }) {
-        Image(MediaResourceUtil.getMedia(pageVO.performance.posterUrl))
+        Image(MediaResourceUtil.getMedia((this.paySuccessVO as PaySuccessPageVO).performance.posterUrl))
           .width(96)
           .height(128)
           .objectFit(ImageFit.Cover)
           .borderRadius(8)
 
-        Text(pageVO.performance.categoryName)
+        Text((this.paySuccessVO as PaySuccessPageVO).performance.categoryName)
           .fontSize(10)
           .fontColor('#FFFFFF')
           .padding({ left: 5, right: 5, top: 2, bottom: 2 })
@@ -183,19 +200,19 @@ struct PaySuccessPage {
       }
 
       Column() {
-        Text(pageVO.performance.projectTitle)
+        Text((this.paySuccessVO as PaySuccessPageVO).performance.projectTitle)
           .fontSize(16)
           .fontWeight(FontWeight.Bold)
           .fontColor('#222222')
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-        Text(pageVO.performance.startTime)
+        Text((this.paySuccessVO as PaySuccessPageVO).performance.startTime)
           .fontSize(13)
           .fontColor('#666666')
           .margin({ top: 10 })
 
-        Text(pageVO.performance.venueAddress)
+        Text((this.paySuccessVO as PaySuccessPageVO).performance.venueAddress)
           .fontSize(13)
           .fontColor('#666666')
           .maxLines(2)
@@ -213,13 +230,13 @@ struct PaySuccessPage {
   }
 
   @Builder
-  private OrderInfoCard(pageVO: PaySuccessPageVO) {
+  private OrderInfoCard() {
     Column() {
-      this.InfoRow('订单编号', pageVO.orderNo)
-      this.InfoRow('票档', pageVO.skuName)
-      this.InfoRow('配送方式', this.getDeliveryTypeText(pageVO.deliveryType))
-      this.InfoRow('支付方式', this.getPayMethodText(pageVO.payMethod))
-      this.InfoRow('支付金额', '￥' + pageVO.payAmount)
+      this.InfoRow('订单编号', (this.paySuccessVO as PaySuccessPageVO).orderNo)
+      this.InfoRow('票档', (this.paySuccessVO as PaySuccessPageVO).skuName)
+      this.InfoRow('配送方式', this.getDeliveryTypeText((this.paySuccessVO as PaySuccessPageVO).deliveryType))
+      this.InfoRow('支付方式', this.getPayMethodText((this.paySuccessVO as PaySuccessPageVO).payMethod))
+      this.InfoRow('支付金额', '￥' + (this.paySuccessVO as PaySuccessPageVO).payAmount)
     }
     .width('100%')
     .padding(12)
@@ -248,7 +265,7 @@ struct PaySuccessPage {
   }
 
   @Builder
-  private BottomButtons(pageVO: PaySuccessPageVO) {
+  private BottomButtons() {
     Row() {
       Button('返回首页')
         .height(44)
@@ -272,7 +289,7 @@ struct PaySuccessPage {
         .backgroundColor('#E33B3B')
         .margin({ left: 12 })
         .onClick(() => {
-          this.goOrderDetail(pageVO.orderId)
+          this.goOrderDetail((this.paySuccessVO as PaySuccessPageVO).orderId)
         })
     }
     .width('100%')
@@ -353,8 +370,18 @@ struct PaySuccessPage {
     return '-'
   }
 
+
+  private clonePaySuccessVO(source: PaySuccessPageVO | undefined): PaySuccessPageVO | undefined {
+    if (source === undefined) return undefined
+    return {
+      payAmount: source.payAmount,
+      performance: { posterUrl: source.performance.posterUrl, categoryName: source.performance.categoryName, projectTitle: source.performance.projectTitle, startTime: source.performance.startTime, venueAddress: source.performance.venueAddress },
+      orderNo: source.orderNo, skuName: source.skuName, deliveryType: source.deliveryType, payMethod: source.payMethod, orderId: source.orderId
+    }
+  }
+
   private syncFromVm(): void {
-    this.paySuccessVO = this.vm.paySuccessVO
+    this.paySuccessVO = this.clonePaySuccessVO(this.vm.paySuccessVO)
     this.errorMessage = this.vm.errorMessage
     this.refreshPage()
   }

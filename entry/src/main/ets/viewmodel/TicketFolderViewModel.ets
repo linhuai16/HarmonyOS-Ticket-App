@@ -26,26 +26,26 @@ export class TicketFolderViewModel {
 
   private ticketRepository: TicketRepository = new TicketRepository()
 
-  loadPage(userId: string): void {
+  async loadPage(userId: string): Promise<void> {
     this.isLoading = true
     this.errorMessage = ''
 
     this.userId = userId
 
     const pageVO: TicketFolderPageVO =
-      this.ticketRepository.getTicketFolderPage(userId)
+      await this.ticketRepository.getTicketFolderPage(userId)
 
     this.tickets = pageVO.tickets
 
     this.isLoading = false
   }
 
-  refresh(): void {
+  async refresh(): Promise<void> {
     if (this.userId.length === 0) {
       return
     }
 
-    this.loadPage(this.userId)
+    await this.loadPage(this.userId)
   }
 
   hasTickets(): boolean {

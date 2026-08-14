@@ -1,4 +1,5 @@
 import { RefundStatus } from '../enums/RefundStatus'
+import { RefundType } from '../enums/RefundType'
 
 /**
  * 退款记录。
@@ -12,8 +13,23 @@ export interface RefundRecord {
   /** 退款记录主键 */
   refundId: string
 
+  /** 退款业务编号 */
+  refundNo: string
+
   /** 所属订单ID */
   orderId: string
+
+  /** 命中的退款规则，可空 */
+  refundRuleId?: string
+
+  /** 命中的阶梯，可空 */
+  matchedStageId?: string
+
+  /** 申请时退款类型快照 */
+  refundTypeSnapshot: RefundType
+
+  /** 申请时手续费比例快照，可空 */
+  feeRateSnapshot?: number
 
   /** 退款申请时间；系统自动退款时取系统发起退款的时间 */
   applyTime: string
@@ -32,4 +48,10 @@ export interface RefundRecord {
 
   /** 退款完成时间，仅退款成功后写入 */
   refundTime?: string
+
+  /** 退款失败原因 */
+  failReason?: string
+
+  /** 最后更新时间 */
+  updateTime: string
 }

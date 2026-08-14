@@ -1,34 +1,42 @@
-import {
-  SubmitOrderPageVO
-} from '../model/vo/order/SubmitOrderPageVO'
-
-import {
-  AudienceListPageVO,
-  AudienceItemVO
-} from '../model/vo/user/AudiencePageVO'
-
-import {
-  AddressListPageVO,
-  AddressItemVO
-} from '../model/vo/user/AddressPageVO'
-
-import {
-  OrderRepository,
-  ConfirmOrderRequest,
-  CreateOrderRequest,
-  CreateOrderResponse
-} from '../repository/OrderRepository'
-
+import { AudienceItemVO, AudienceListPageVO } from '../model/vo/user/AudiencePageVO'
+import { AddressItemVO, AddressListPageVO } from '../model/vo/user/AddressPageVO'
+import { TicketSelectPageVO, TicketSkuSelectVO } from '../model/vo/performance/TicketSelectPageVO'
+import { PurchaseFulfillmentOptionVO, PurchaseOptionsVO } from '../model/vo/ticketsource/PurchaseOptionVO'
+import { V13AudienceEligibilityVO, V13FulfillmentOptionVO, V13PurchaseInitVO, V13SubmitOrderVO } from '../model/vo/ticketsource/PurchaseV13VO'
+import { QuotedOrderCreateVO, OrderActionVO } from '../model/vo/ticketsource/OrderQuoteVO'
+import { OrderTicketSelectionRequest } from '../model/vo/ticketsource/TicketSourceTypes'
+import { MoneyUtil } from '../model/vo/ticketsource/MoneyVO'
+import { PayMethod } from '../model/enums/PayMethod'
+import { PerformanceRepository } from '../repository/PerformanceRepository'
 import { AudienceRepository } from '../repository/AudienceRepository'
 import { AddressRepository } from '../repository/AddressRepository'
+import { TicketSourcePurchaseRepository } from '../repository/TicketSourcePurchaseRepository'
 import { UserRepository } from '../repository/UserRepository'
-import { DeliveryType } from '../model/enums/DeliveryType'
 
+/**
+ * V1.3-B10R-5 提交订单页 VM。
+ * 页面金额只按展示价 + 配置配送费计算；点击提交订单时后端再做最终实时确认、锁库存、创建订单。
+ */
 export class SubmitOrderViewModel {
-  pageVO: SubmitOrderPageVO | undefined = undefined
+  pageVO: TicketSelectPageVO | undefined = undefined
+  selectedSku: TicketSkuSelectVO | undefined = undefined
+  purchaseOptions: PurchaseOptionsVO | undefined = undefined
+  fulfillmentOptions: PurchaseFulfillmentOptionVO[] = []
+  selectedFulfillmentOption: PurchaseFulfillmentOptionVO | undefined = undefined
 
   audienceList: AudienceItemVO[] = []
   addressList: AddressItemVO[] = []
+  audienceEligibility: V13AudienceEligibilityVO[] = []
+  selectedAudienceIds: string[] = []
+  selectedAddressId: string = ''
+
+  createdOrder: QuotedOrderCreateVO | undefined = undefined
+  purchaseInit: V13PurchaseInitVO | undefined = undefined
+  estimatedTicketAmountMinor: number = 0
+  estimatedDeliveryFeeMinor: number = 0
+  estimatedPayAmountMinor: number = 0
+  clientSubmitNo: string = ''
+  priceChangedAwaitingConfirm: boolean = false
 
   userId: string = ''
   projectId: string = ''
@@ -36,429 +44,540 @@ export class SubmitOrderViewModel {
   skuId: string = ''
   quantity: number = 1
 
-  selectedAudienceIds: string[] = []
-  deliveryType: DeliveryType = DeliveryType.ETICKET
-  selectedAddressId: string = ''
-
   isLoading: boolean = false
-  isSubmitting: boolean = false
+  isCreating: boolean = false
+  isPaying: boolean = false
   errorMessage: string = ''
-  submitErrorMessage: string = ''
+  actionErrorMessage: string = ''
+  private inventoryChangedAfterSubmit: boolean = false
 
-  createOrderResponse: CreateOrderResponse | undefined = undefined
-
-  private orderRepository: OrderRepository = new OrderRepository()
+  private performanceRepository: PerformanceRepository = new PerformanceRepository()
   private audienceRepository: AudienceRepository = new AudienceRepository()
   private addressRepository: AddressRepository = new AddressRepository()
+  private purchaseRepository: TicketSourcePurchaseRepository = new TicketSourcePurchaseRepository()
   private userRepository: UserRepository = new UserRepository()
+  private pageNonce: string = ''
 
   async loadPage(userId: string, projectId: string, sessionId: string, skuId: string, quantity: number): Promise<void> {
-    this.selectedAudienceIds = []
-    this.selectedAddressId = ''
-    this.createOrderResponse = undefined
+    this.resetState()
     this.isLoading = true
-    this.errorMessage = ''
-    this.submitErrorMessage = ''
-
-    const effectiveUserId: string = this.resolveEffectiveUserId(userId)
-
-    this.userId = effectiveUserId
+    this.userId = this.resolveEffectiveUserId(userId)
     this.projectId = projectId
     this.sessionId = sessionId
     this.skuId = skuId
-    this.quantity = quantity
+    this.quantity = quantity > 0 ? quantity : 1
+    this.pageNonce = String(Date.now())
 
-    const request: ConfirmOrderRequest = {
-      projectId: projectId,
-      sessionId: sessionId,
-      skuId: skuId,
-      quantity: quantity
-    }
+    try {
+      const page: TicketSelectPageVO | undefined =
+        await this.performanceRepository.getTicketSelectPage(projectId, sessionId)
+      if (page === undefined) throw new Error('票档页面数据不存在')
+      const sku: TicketSkuSelectVO | undefined = page.skus.find((item: TicketSkuSelectVO) => item.skuId === skuId)
+      if (sku === undefined) throw new Error('当前票档不存在')
+      if (this.quantity > page.limitPerOrder) throw new Error('购买数量超过场次限购')
+      if (sku.stockAvailable !== undefined && this.quantity > sku.stockAvailable) throw new Error('当前票档库存不足，请重新选择')
 
-    const pageVO: SubmitOrderPageVO | undefined =
-      await this.orderRepository.getSubmitOrderPage(request)
-
-    if (pageVO === undefined) {
-      this.errorMessage = '确认订单数据不存在'
-      this.isLoading = false
-      return
-    }
-
-    this.pageVO = pageVO
-    this.deliveryType = pageVO.deliveryType
-
-    this.loadAudienceList(effectiveUserId, true)
-    this.loadAddressList(effectiveUserId, true)
-
-    if (this.deliveryType === DeliveryType.ETICKET) {
-      this.selectedAddressId = ''
-    }
-
-    this.isLoading = false
-  }
-
-  loadAudienceList(
-    userId: string,
-    applyDefault: boolean = true,
-    preferDefaultAudience: boolean = false
-  ): void {
-    const audiencePageVO: AudienceListPageVO =
-      this.audienceRepository.getAudienceList(userId)
-
-    this.audienceList = audiencePageVO.audiences
-    this.syncSelectedAudienceAfterListChanged(applyDefault, preferDefaultAudience)
-  }
-
-  loadAddressList(
-    userId: string,
-    applyDefault: boolean = true,
-    preferDefaultAddress: boolean = false
-  ): void {
-    const addressPageVO: AddressListPageVO =
-      this.addressRepository.getAddressList(userId)
-
-    this.addressList = addressPageVO.addresses
-    this.syncSelectedAddressAfterListChanged(applyDefault, preferDefaultAddress)
-  }
-
-  selectAudience(audienceId: string): void {
-    if (this.pageVO === undefined) {
-      return
-    }
-
-    this.submitErrorMessage = ''
-
-    const existIndex: number = this.selectedAudienceIds.indexOf(audienceId)
-
-    if (existIndex >= 0) {
-      this.selectedAudienceIds = this.selectedAudienceIds.filter((selectedAudienceId: string) => {
-        return selectedAudienceId !== audienceId
-      })
-      return
-    }
-
-    if (this.pageVO.requiredAudienceCount === 1) {
-      this.selectedAudienceIds = [audienceId]
-      return
-    }
-
-    if (this.selectedAudienceIds.length >= this.pageVO.requiredAudienceCount) {
-      this.submitErrorMessage = `最多选择 ${this.pageVO.requiredAudienceCount} 位观演人`
-      return
-    }
-
-    this.selectedAudienceIds = this.selectedAudienceIds.concat([audienceId])
-  }
-  //同步观演人列表变化后的选择状态
-  private syncSelectedAudienceAfterListChanged(
-    applyDefault: boolean,
-    preferDefaultAudience: boolean
-  ): void {
-    const validAudienceIds: string[] = this.audienceList.map((item: AudienceItemVO) => item.audienceId)
-
-    this.selectedAudienceIds = this.selectedAudienceIds.filter((audienceId: string) => {
-      return validAudienceIds.indexOf(audienceId) >= 0
-    })
-
-    if (this.pageVO === undefined) {
-      return
-    }
-
-    const requiredCount: number = this.pageVO.requiredAudienceCount
-
-    if (requiredCount <= 0) {
-      this.selectedAudienceIds = []
-      return
-    }
-
-    if (this.selectedAudienceIds.length > requiredCount) {
-      this.selectedAudienceIds = this.selectedAudienceIds.slice(0, requiredCount)
-    }
-
-    if (!applyDefault) {
-      return
-    }
-
-    const defaultAudience: AudienceItemVO | undefined =
-      this.audienceList.find((item: AudienceItemVO) => item.isDefault)
-
-    if (defaultAudience === undefined) {
-      return
-    }
-
-    if (preferDefaultAudience || this.selectedAudienceIds.length === 0) {
-      if (requiredCount === 1) {
-        this.selectedAudienceIds = [defaultAudience.audienceId]
-        return
+      const init: V13PurchaseInitVO = await this.purchaseRepository.initPurchase(this.userId, projectId, sessionId, skuId, this.quantity)
+      if (!init.inventoryView.canContinue) {
+        throw new Error(init.inventoryView.displayText.length > 0 ? init.inventoryView.displayText : '当前票档不可购买')
+      }
+      if (this.quantity > init.limitPerOrder) throw new Error('购买数量超过限购')
+      if (init.inventoryView.availableStock !== undefined && this.quantity > init.inventoryView.availableStock) {
+        throw new Error('当前票档库存不足，请重新选择')
       }
 
-      const remainSelectedIds: string[] = this.selectedAudienceIds.filter((audienceId: string) => {
-        return audienceId !== defaultAudience.audienceId
-      })
+      const v13Options: PurchaseFulfillmentOptionVO[] = init.fulfillmentOptions.map(
+        (item: V13FulfillmentOptionVO): PurchaseFulfillmentOptionVO => {
+          return {
+            optionCode: item.optionCode,
+            ticketMode: item.credentialType,
+            deliveryMode: item.deliveryMethod,
+            label: item.displayName,
+            requiresAddress: item.requiresAddress,
+            recommended: item.recommended,
+            deliveryFee: item.deliveryFee
+          }
+        }
+      )
+      const options: PurchaseOptionsVO = {
+        projectId: init.projectId,
+        sessionId: init.sessionId,
+        skuId: init.skuId,
+        saleable: init.inventoryView.canContinue,
+        purchaseMode: init.purchaseMode,
+        limitPerOrder: init.limitPerOrder,
+        stockAvailable: init.inventoryView.availableStock,
+        stockExact: init.inventoryView.exact,
+        options: v13Options,
+        warnings: []
+      }
 
-      this.selectedAudienceIds = [defaultAudience.audienceId]
-        .concat(remainSelectedIds)
-        .slice(0, requiredCount)
+      this.pageVO = page
+      this.selectedSku = sku
+      this.purchaseInit = init
+      this.audienceEligibility = init.audienceEligibility
+      this.estimatedTicketAmountMinor = init.estimatedAmount.ticketAmount.amountMinor
+      this.purchaseOptions = options
+      this.fulfillmentOptions = options.options
+      this.selectedFulfillmentOption = this.findRecommendedOption(options.options)
+      this.refreshDeliveryFeeBySelectedOption()
+
+      if (this.userId.length > 0) {
+        await this.loadAudienceList(true, false)
+        await this.loadAddressList(true, false)
+      }
+      this.applyAddressRequirement()
+      this.updateActionHint()
+    } catch (error) {
+      const safeMessage: string = this.toUserSafeMessage(this.message(error, '提交订单页加载失败'))
+      this.errorMessage = safeMessage
+      if (safeMessage.indexOf('库存') >= 0) {
+        this.inventoryChangedAfterSubmit = true
+      }
+    } finally {
+      this.isLoading = false
     }
-  }
-
-  private applyDeliveryTypeFromPageVO(): void {
-    if (this.pageVO === undefined) {
-      this.deliveryType = DeliveryType.ETICKET
-      this.selectedAddressId = ''
-      return
-    }
-
-    this.deliveryType = this.pageVO.deliveryType
-
-    if (this.deliveryType === DeliveryType.ETICKET) {
-      this.selectedAddressId = ''
-      return
-    }
-
-    if (this.deliveryType === DeliveryType.PAPER_TICKET) {
-      this.applyDefaultAddressSelection()
-    }
-  }
-
-
-  selectAddress(addressId: string): void {
-    this.submitErrorMessage = ''
-    this.selectedAddressId = addressId
   }
 
   /**
-   * 同步地址列表变化后的选中状态
-   *
-   * 场景：
-   * 1. 从地址新增页返回提交订单页后，地址列表刷新；
-   * 2. 新增地址被设为默认地址时，需要优先选中新默认地址；
-   * 3. 如果原来选中的地址已经不存在，需要清空选中；
-   * 4. 如果当前订单是电子票，不需要地址，直接清空 selectedAddressId。
+   * 重新拉取当前提交页所依赖的票档/库存/价格/履约方式，并尽量保留用户已经选择的观演人、地址和履约方式。
+   * 用于 onPageShow 与手动刷新，避免返回上一级以后才看到后台/Provider 的最新状态。
    */
-  private syncSelectedAddressAfterListChanged(
-    applyDefault: boolean,
-    preferDefaultAddress: boolean
-  ): void {
-    if (this.deliveryType !== DeliveryType.PAPER_TICKET) {
-      this.selectedAddressId = ''
+  async refreshCurrentPurchase(): Promise<void> {
+    if (this.projectId.length === 0 || this.sessionId.length === 0 || this.skuId.length === 0) {
       return
     }
 
-    const selectedAddress: AddressItemVO | undefined =
-      this.addressList.find((item: AddressItemVO) => {
-        return item.addressId === this.selectedAddressId
-      })
+    const previousAudienceIds: string[] = this.selectedAudienceIds.slice()
+    const previousAddressId: string = this.selectedAddressId
+    const previousOptionCode: string = this.selectedFulfillmentOption?.optionCode ?? ''
+    const currentUserId: string = this.resolveEffectiveUserId(this.userId)
+    const projectId: string = this.projectId
+    const sessionId: string = this.sessionId
+    const skuId: string = this.skuId
+    const quantity: number = this.quantity
 
-    if (selectedAddress === undefined) {
-      this.selectedAddressId = ''
-    }
-
-    if (!applyDefault) {
+    await this.loadPage(currentUserId, projectId, sessionId, skuId, quantity)
+    if (this.pageVO === undefined || this.selectedSku === undefined) {
       return
     }
 
-    const defaultAddress: AddressItemVO | undefined =
-      this.addressList.find((item: AddressItemVO) => {
-        return item.isDefault
-      })
-
-    if (defaultAddress === undefined) {
-      return
+    if (previousOptionCode.length > 0) {
+      const previousOption: PurchaseFulfillmentOptionVO | undefined = this.fulfillmentOptions.find(
+        (item: PurchaseFulfillmentOptionVO) => item.optionCode === previousOptionCode)
+      if (previousOption !== undefined) {
+        this.selectedFulfillmentOption = previousOption
+        this.refreshDeliveryFeeBySelectedOption()
+      }
     }
 
-    if (preferDefaultAddress || this.selectedAddressId.length === 0) {
-      this.selectedAddressId = defaultAddress.addressId
+    const validAudienceIds: string[] = this.audienceList.map((item: AudienceItemVO): string => item.audienceId)
+    this.selectedAudienceIds = previousAudienceIds.filter((id: string): boolean => {
+      return validAudienceIds.indexOf(id) >= 0 && this.canSelectAudience(id)
+    })
+    if (this.selectedAudienceIds.length > quantity) {
+      this.selectedAudienceIds = this.selectedAudienceIds.slice(0, quantity)
     }
+
+    if (previousAddressId.length > 0 && this.addressList.some((item: AddressItemVO): boolean => item.addressId === previousAddressId)) {
+      this.selectedAddressId = previousAddressId
+    }
+    this.applyAddressRequirement()
+    this.actionErrorMessage = ''
+    this.updateActionHint()
   }
 
-  //默认地址选择方法
-  private applyDefaultAddressSelection(): void {
-    if (this.deliveryType !== DeliveryType.PAPER_TICKET) {
-      return
-    }
-
-    if (this.selectedAddressId.length > 0) {
-      return
-    }
-
-    const defaultAddress: AddressItemVO | undefined =
-      this.addressList.find((item: AddressItemVO) => item.isDefault)
-
-    if (defaultAddress !== undefined) {
-      this.selectedAddressId = defaultAddress.addressId
-    }
-  }
-
-  canSubmit(): boolean {
-    if (this.pageVO === undefined) {
-      return false
-    }
-
-    if (this.selectedAudienceIds.length !== this.pageVO.requiredAudienceCount) {
-      return false
-    }
-
-    if (this.deliveryType === DeliveryType.PAPER_TICKET && this.selectedAddressId.length === 0) {
-      return false
-    }
-    return true
-  }
-  private validateBeforeSubmit(): boolean {
-    if (this.pageVO === undefined) {
-      this.submitErrorMessage = '订单数据不存在'
-      return false
-    }
-
-    if (this.selectedAudienceIds.length !== this.pageVO.requiredAudienceCount) {
-      this.submitErrorMessage = '请选择观演人'
-      return false
-    }
-
-    if (this.deliveryType === DeliveryType.PAPER_TICKET && this.selectedAddressId.length === 0) {
-      this.submitErrorMessage = '请选择收货地址'
-      return false
-    }
-
-    this.submitErrorMessage = ''
-    return true
-  }
-
-
-  async submitOrder(): Promise<CreateOrderResponse | undefined> {
-    const effectiveUserId: string = this.resolveEffectiveUserId(this.userId)
-    if (effectiveUserId.length === 0 || !this.userRepository.isLogin()) {
-      this.submitErrorMessage = '请先登录后再提交订单'
-      return undefined
-    }
-    this.userId = effectiveUserId
-
-    if (!this.validateBeforeSubmit()) {
-      return undefined
-    }
-
-    this.isSubmitting = true
-    this.errorMessage = ''
-
-    const request: CreateOrderRequest = {
-      userId: this.userId,
-      projectId: this.projectId,
-      sessionId: this.sessionId,
-      skuId: this.skuId,
-      quantity: this.quantity,
-      audienceIds: this.selectedAudienceIds,
-      deliveryType: this.deliveryType,
-      addressId: this.selectedAddressId.length === 0 ? undefined : this.selectedAddressId
-    }
-
-    const response: CreateOrderResponse | undefined =
-      await this.orderRepository.createOrder(request)
-
-    if (response === undefined) {
-      const repositoryErrorMessage: string = this.orderRepository.getLastErrorMessage()
-      this.errorMessage = repositoryErrorMessage.length > 0 ?
-        repositoryErrorMessage :
-        '提交订单失败，请重新选择票档或观演人'
-      this.isSubmitting = false
-      return undefined
-    }
-
-    this.createOrderResponse = response
-    this.isSubmitting = false
-    return response
-  }
-
-  refreshAudienceList(preferDefaultAudience: boolean = false): void {
-    const effectiveUserId: string = this.resolveEffectiveUserId(this.userId)
-    this.userId = effectiveUserId
-
-    if (effectiveUserId.length === 0) {
+  async refreshAudienceList(preferDefaultAudience: boolean = false): Promise<void> {
+    this.userId = this.resolveEffectiveUserId(this.userId)
+    if (this.userId.length === 0) {
       this.audienceList = []
       this.selectedAudienceIds = []
+      this.updateActionHint()
       return
     }
-
-    this.loadAudienceList(effectiveUserId, true, preferDefaultAudience)
+    await this.loadAudienceList(true, preferDefaultAudience)
+    this.updateActionHint()
   }
-  //判断观演人是否选中
+
+  async refreshAddressList(preferDefaultAddress: boolean = false): Promise<void> {
+    this.userId = this.resolveEffectiveUserId(this.userId)
+    if (this.userId.length === 0) {
+      this.addressList = []
+      this.selectedAddressId = ''
+      this.updateActionHint()
+      return
+    }
+    await this.loadAddressList(true, preferDefaultAddress)
+    this.applyAddressRequirement()
+    this.updateActionHint()
+  }
+
+  selectAudience(audienceId: string): void {
+    this.actionErrorMessage = ''
+    if (!this.canSelectAudience(audienceId)) {
+      this.actionErrorMessage = this.getAudienceDisabledReason(audienceId)
+      this.updateActionHint()
+      return
+    }
+    const index: number = this.selectedAudienceIds.indexOf(audienceId)
+    if (index >= 0) {
+      this.selectedAudienceIds = this.selectedAudienceIds.filter((id: string) => id !== audienceId)
+      this.updateActionHint()
+      return
+    }
+    if (this.selectedAudienceIds.length >= this.quantity) {
+      this.actionErrorMessage = `最多选择 ${this.quantity} 位观演人`
+      this.updateActionHint()
+      return
+    }
+    this.selectedAudienceIds = this.selectedAudienceIds.concat([audienceId])
+    this.updateActionHint()
+  }
+
+  async selectFulfillmentOption(ticketMode: string, deliveryMode: string, optionCode: string = ''): Promise<void> {
+    this.actionErrorMessage = ''
+    const target: PurchaseFulfillmentOptionVO | undefined = this.fulfillmentOptions.find(
+      (item: PurchaseFulfillmentOptionVO) => item.ticketMode === ticketMode && item.deliveryMode === deliveryMode &&
+        (optionCode.length === 0 || item.optionCode === optionCode))
+    if (target === undefined) {
+      this.actionErrorMessage = '当前入场/取票方式不可用'
+      this.updateActionHint()
+      return
+    }
+    this.selectedFulfillmentOption = target
+    this.priceChangedAwaitingConfirm = false
+    this.refreshDeliveryFeeBySelectedOption()
+    this.applyAddressRequirement()
+    this.updateActionHint()
+  }
+
+  async selectAddress(addressId: string): Promise<void> {
+    if (!this.requiresAddress()) {
+      this.selectedAddressId = ''
+      this.updateActionHint()
+      return
+    }
+    this.selectedAddressId = addressId
+    this.priceChangedAwaitingConfirm = false
+    this.actionErrorMessage = ''
+    this.updateActionHint()
+  }
+
+  async createOrder(): Promise<QuotedOrderCreateVO | undefined> {
+    this.actionErrorMessage = ''
+    this.inventoryChangedAfterSubmit = false
+    if (!this.validateBeforeSubmit()) {
+      this.updateActionHint()
+      return undefined
+    }
+    const option: PurchaseFulfillmentOptionVO = this.selectedFulfillmentOption as PurchaseFulfillmentOptionVO
+    const tickets: OrderTicketSelectionRequest[] = this.buildTickets()
+    if (this.clientSubmitNo.length === 0) {
+      this.clientSubmitNo = 'APP-B10R5-' + this.pageNonce + '-' + String(Date.now())
+    }
+    this.isCreating = true
+    try {
+      const result: V13SubmitOrderVO = await this.purchaseRepository.submitOrder({
+        userId: this.userId,
+        projectId: this.projectId,
+        sessionId: this.sessionId,
+        skuId: this.skuId,
+        quantity: this.quantity,
+        tickets: tickets,
+        fulfillmentOptionCode: option.optionCode,
+        addressId: option.requiresAddress ? this.selectedAddressId : undefined,
+        clientSubmitNo: this.clientSubmitNo,
+        expectedPayAmountMinor: this.estimatedPayAmountMinor
+      })
+      if (result.priceStatus === 'CHANGED') {
+        this.estimatedTicketAmountMinor = result.ticketAmount.amountMinor
+        this.estimatedDeliveryFeeMinor = result.deliveryFee.amountMinor
+        this.estimatedPayAmountMinor = result.payAmount.amountMinor
+        this.priceChangedAwaitingConfirm = true
+        this.actionErrorMessage = result.userMessage.length > 0 ? result.userMessage : '价格已更新，请确认后重新提交'
+        return undefined
+      }
+      if (result.priceStatus !== 'CONFIRMED' || result.orderId.length === 0) {
+        this.actionErrorMessage = result.userMessage.length > 0 ? result.userMessage : '订单未创建，请重新提交'
+        return undefined
+      }
+      this.priceChangedAwaitingConfirm = false
+      const created: QuotedOrderCreateVO = {
+        orderId: result.orderId,
+        orderNo: result.orderNo,
+        orderStatus: result.orderStatus,
+        paymentStatus: 'UNPAID',
+        fulfillmentMode: 'TICKET_SOURCE',
+        ticketCount: this.quantity,
+        payAmount: result.payAmount,
+        payExpireTime: result.reservationExpireAt
+      }
+      this.createdOrder = created
+      return created
+    } catch (error) {
+      const message: string = this.message(error, '提交订单失败')
+      const safeMessage: string = this.toUserSafeMessage(message)
+      this.actionErrorMessage = safeMessage
+      if (safeMessage.indexOf('库存') >= 0) {
+        this.inventoryChangedAfterSubmit = true
+        this.clientSubmitNo = ''
+      }
+      return undefined
+    } finally {
+      this.isCreating = false
+      this.updateActionHint()
+    }
+  }
+
+  async payCreatedOrder(payMethod: PayMethod): Promise<OrderActionVO | undefined> {
+    if (this.createdOrder === undefined) {
+      this.actionErrorMessage = '待支付订单不存在'
+      return undefined
+    }
+    this.isPaying = true
+    try {
+      const paid: V13SubmitOrderVO = await this.purchaseRepository.payOrder(this.createdOrder.orderId, this.userId, payMethod)
+      return {
+        orderId: paid.orderId,
+        orderNo: paid.orderNo,
+        orderStatus: paid.orderStatus,
+        paymentStatus: paid.orderStatus === 'WAIT_USE' ? 'PAID' : 'UNKNOWN',
+        ticketCount: this.quantity,
+        operationTime: '',
+        message: paid.userMessage
+      }
+    } catch (error) {
+      this.actionErrorMessage = this.toUserSafeMessage(this.message(error, '支付失败'))
+      return undefined
+    } finally {
+      this.isPaying = false
+    }
+  }
+
+  consumeInventoryChangedAfterSubmit(): boolean {
+    const changed: boolean = this.inventoryChangedAfterSubmit
+    this.inventoryChangedAfterSubmit = false
+    return changed
+  }
+
+  canAttemptSubmit(): boolean {
+    return !this.isCreating && this.pageVO !== undefined && this.selectedSku !== undefined
+  }
+
+  canCreateOrder(): boolean {
+    return this.getSubmitDisabledReason().length === 0
+  }
+
+  getSubmitDisabledReason(): string {
+    if (this.isCreating) return '订单正在提交，请勿重复操作'
+    if (this.pageVO === undefined || this.selectedSku === undefined) return '订单信息未加载完成'
+    if (!this.isLogin()) return '请先登录后再购票'
+    if (this.selectedFulfillmentOption === undefined) return '请选择入场/取票方式'
+    if (this.selectedAudienceIds.length !== this.quantity) return '观演人未选无法下单'
+    for (let index: number = 0; index < this.selectedAudienceIds.length; index++) {
+      const audienceId: string = this.selectedAudienceIds[index]
+      if (!this.canSelectAudience(audienceId)) return this.getAudienceDisabledReason(audienceId)
+    }
+    if (this.hasDuplicatedSelectedAudience()) return '同一观演人不能绑定两张票'
+    if (this.requiresAddress() && this.selectedAddressId.length === 0) return '快递票还未添加收货人信息，无法下单'
+    return ''
+  }
+
+  requiresAddress(): boolean {
+    return this.selectedFulfillmentOption?.requiresAddress ?? false
+  }
+
   isAudienceSelected(audienceId: string): boolean {
     return this.selectedAudienceIds.indexOf(audienceId) >= 0
   }
-  //观演人选择数量文案
-  getAudienceSelectText(): string {
-    if (this.pageVO === undefined) {
-      return ''
-    }
 
-    return `已选择 ${this.selectedAudienceIds.length}/${this.pageVO.requiredAudienceCount} 位`
+  isAudienceDisabled(audienceId: string): boolean {
+    return !this.canSelectAudience(audienceId)
   }
 
-  //刷新地址方法
-  refreshAddressList(preferDefaultAddress: boolean = false): void {
-    const effectiveUserId: string = this.resolveEffectiveUserId(this.userId)
-    this.userId = effectiveUserId
-
-    if (effectiveUserId.length === 0) {
-      this.addressList = []
-      this.selectedAddressId = ''
-      return
+  getAudienceDisabledReason(audienceId: string): string {
+    const eligibility: V13AudienceEligibilityVO | undefined = this.audienceEligibility.find(
+      (item: V13AudienceEligibilityVO) => item.audienceId === audienceId)
+    if (eligibility !== undefined && !eligibility.canSelect) {
+      return eligibility.disabledReason.length > 0 ? eligibility.disabledReason : '当前观演人不可选择'
     }
-
-    this.loadAddressList(effectiveUserId, true, preferDefaultAddress)
+    return '当前观演人不可选择'
   }
-  //地址是否选中判断
+
   isAddressSelected(addressId: string): boolean {
     return this.selectedAddressId === addressId
   }
-  //获取当前选中地址方法
-  getSelectedAddress(): AddressItemVO | undefined {
-    return this.addressList.find((item: AddressItemVO) => item.addressId === this.selectedAddressId)
+
+  isFulfillmentSelected(item: PurchaseFulfillmentOptionVO): boolean {
+    if (this.selectedFulfillmentOption === undefined) return false
+    return this.selectedFulfillmentOption.optionCode === item.optionCode
   }
 
-
-  //是否展示地址区域
-  shouldShowAddressArea(): boolean {
-    return this.deliveryType === DeliveryType.PAPER_TICKET
-  }
-  //配送方式文案
-  getDeliveryTypeText(): string {
-    if (this.deliveryType === DeliveryType.PAPER_TICKET) {
-      return '快递票'
-    }
-
-    return '电子票'
-  }
-  //配送方式提示
-  getDeliveryTipText(): string {
-    if (this.deliveryType === DeliveryType.PAPER_TICKET) {
-      return '实体票将通过快递配送，请选择收货地址'
-    }
-
-    return '支付成功后，无需取票，前往票夹查看入场凭证'
-  }
-  // 是否还能继续选择观演人
-  canSelectMoreAudience(): boolean {
-    if (this.pageVO === undefined) {
-      return false
-    }
-
-    return this.selectedAudienceIds.length < this.pageVO.requiredAudienceCount
+  getAudienceSelectText(): string {
+    return `已选择 ${this.selectedAudienceIds.length}/${this.quantity} 位`
   }
 
-  private resolveEffectiveUserId(userId: string = ''): string {
-    const normalizedUserId: string = userId.trim()
-    if (normalizedUserId.length > 0) {
-      return normalizedUserId
-    }
+  getReferencePriceText(): string {
+    if (this.selectedSku === undefined) return '待确认'
+    return '¥' + this.selectedSku.price.toFixed(2)
+  }
 
-    return this.userRepository.getCurrentUserId().trim()
+  getTicketAmountText(): string {
+    return MoneyUtil.format({ amountMinor: this.estimatedTicketAmountMinor, currency: 'CNY' })
+  }
+
+  getDeliveryFeeText(): string {
+    return MoneyUtil.format({ amountMinor: this.estimatedDeliveryFeeMinor, currency: 'CNY' })
+  }
+
+  getPayAmountText(): string {
+    return MoneyUtil.format({ amountMinor: this.estimatedPayAmountMinor, currency: 'CNY' })
+  }
+
+  getPriceTipText(): string {
+    if (this.priceChangedAwaitingConfirm) return '价格已更新，请核对新的票款、快递费和合计后重新提交'
+    return '页面金额为展示价预估，提交订单时以系统最终确认金额为准'
   }
 
   isLogin(): boolean {
-    return this.userRepository.isLogin()
+    return this.userRepository.isLogin() && this.resolveEffectiveUserId(this.userId).length > 0
   }
 
-  clearError(): void {
+  private async loadAudienceList(applyDefault: boolean, preferDefault: boolean): Promise<void> {
+    const page: AudienceListPageVO = await this.audienceRepository.getAudienceList(this.userId)
+    this.audienceList = page.audiences
+    const validIds: string[] = this.audienceList.map((item: AudienceItemVO) => item.audienceId)
+    this.selectedAudienceIds = this.selectedAudienceIds.filter((id: string) => validIds.indexOf(id) >= 0 && this.canSelectAudience(id))
+    if (this.selectedAudienceIds.length > this.quantity) this.selectedAudienceIds = this.selectedAudienceIds.slice(0, this.quantity)
+    if (applyDefault && (preferDefault || this.selectedAudienceIds.length === 0)) {
+      const defaultAudience: AudienceItemVO | undefined = this.audienceList.find(
+        (item: AudienceItemVO) => item.isDefault && this.canSelectAudience(item.audienceId))
+      if (defaultAudience !== undefined) this.selectedAudienceIds = [defaultAudience.audienceId]
+    }
+  }
+
+  private async loadAddressList(applyDefault: boolean, preferDefault: boolean): Promise<void> {
+    const page: AddressListPageVO = await this.addressRepository.getAddressList(this.userId)
+    this.addressList = page.addresses
+    const exists: boolean = this.addressList.some((item: AddressItemVO) => item.addressId === this.selectedAddressId)
+    if (!exists) this.selectedAddressId = ''
+    if (applyDefault && (preferDefault || this.selectedAddressId.length === 0)) {
+      const defaultAddress: AddressItemVO | undefined = this.addressList.find((item: AddressItemVO) => item.isDefault)
+      if (defaultAddress !== undefined) this.selectedAddressId = defaultAddress.addressId
+    }
+  }
+
+  private findRecommendedOption(options: PurchaseFulfillmentOptionVO[]): PurchaseFulfillmentOptionVO | undefined {
+    const recommended: PurchaseFulfillmentOptionVO | undefined = options.find((item: PurchaseFulfillmentOptionVO) => item.recommended)
+    return recommended ?? options[0]
+  }
+
+  private applyAddressRequirement(): void {
+    if (!this.requiresAddress()) {
+      this.selectedAddressId = ''
+      return
+    }
+    if (this.selectedAddressId.length > 0) return
+    const defaultAddress: AddressItemVO | undefined = this.addressList.find((item: AddressItemVO) => item.isDefault)
+    if (defaultAddress !== undefined) this.selectedAddressId = defaultAddress.addressId
+  }
+
+  private validateBeforeSubmit(): boolean {
+    const reason: string = this.getSubmitDisabledReason()
+    if (reason.length > 0) {
+      this.actionErrorMessage = reason.indexOf('请选择') >= 0 && reason.indexOf('观演人') >= 0 ? '观演人未选无法下单' : reason
+      return false
+    }
+    return true
+  }
+
+  private buildTickets(): OrderTicketSelectionRequest[] {
+    return this.selectedAudienceIds.map((audienceId: string, index: number): OrderTicketSelectionRequest => {
+      return {
+        clientTicketNo: 'B10R2-' + this.pageNonce + '-' + String(index + 1) + '-' + audienceId,
+        audienceId: audienceId
+      }
+    })
+  }
+
+  private refreshDeliveryFeeBySelectedOption(): void {
+    this.estimatedDeliveryFeeMinor = this.selectedFulfillmentOption?.deliveryFee.amountMinor ?? 0
+    this.refreshEstimatedPayAmount()
+  }
+
+  private refreshEstimatedPayAmount(): void {
+    this.estimatedPayAmountMinor = this.estimatedTicketAmountMinor + this.estimatedDeliveryFeeMinor
+  }
+
+  private canSelectAudience(audienceId: string): boolean {
+    const eligibility: V13AudienceEligibilityVO | undefined = this.audienceEligibility.find(
+      (item: V13AudienceEligibilityVO) => item.audienceId === audienceId)
+    return eligibility === undefined || eligibility.canSelect
+  }
+
+  private hasDuplicatedSelectedAudience(): boolean {
+    const ids: string[] = []
+    for (let index: number = 0; index < this.selectedAudienceIds.length; index++) {
+      const id: string = this.selectedAudienceIds[index]
+      if (ids.indexOf(id) >= 0) return true
+      ids.push(id)
+    }
+    return false
+  }
+
+  private updateActionHint(): void {
+    if (this.actionErrorMessage.length > 0) return
+    const reason: string = this.getSubmitDisabledReason()
+    this.actionErrorMessage = reason
+  }
+
+  private resetState(): void {
+    this.pageVO = undefined
+    this.selectedSku = undefined
+    this.purchaseOptions = undefined
+    this.fulfillmentOptions = []
+    this.selectedFulfillmentOption = undefined
+    this.audienceList = []
+    this.addressList = []
+    this.audienceEligibility = []
+    this.selectedAudienceIds = []
+    this.selectedAddressId = ''
+    this.createdOrder = undefined
+    this.purchaseInit = undefined
+    this.estimatedTicketAmountMinor = 0
+    this.estimatedDeliveryFeeMinor = 0
+    this.estimatedPayAmountMinor = 0
+    this.clientSubmitNo = ''
+    this.priceChangedAwaitingConfirm = false
     this.errorMessage = ''
+    this.actionErrorMessage = ''
+    this.inventoryChangedAfterSubmit = false
+  }
+
+  private resolveEffectiveUserId(userId: string = ''): string {
+    const normalized: string = userId.trim()
+    return normalized.length > 0 ? normalized : this.userRepository.getCurrentUserId().trim()
+  }
+
+  private message(error: Object, fallback: string): string {
+    return error instanceof Error ? error.message : fallback
+  }
+
+  private toUserSafeMessage(message: string): string {
+    let safeMessage: string = message.trim()
+    const apiPrefix: string = '接口返回失败：'
+    if (safeMessage.startsWith(apiPrefix)) {
+      safeMessage = safeMessage.substring(apiPrefix.length).trim()
+    }
+    if (safeMessage.startsWith('接口返回失败，')) {
+      safeMessage = safeMessage.substring('接口返回失败，'.length).trim()
+    }
+
+    return safeMessage.replace(/第三方票源/g, '票务系统')
+      .replace(/第三方/g, '票务系统')
+      .replace(/provider/gi, 'system')
+      .replace(/adapter/gi, 'system')
+      .replace(/MOCK-SKU-[A-Za-z0-9-]+/g, '当前票档')
+      .replace(/MOCK[A-Za-z0-9_-]*/g, '票务系统')
   }
 }

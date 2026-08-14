@@ -22,12 +22,16 @@ struct SearchResultPage {
   @State isLoading: boolean = false
   @State errorMessage: string = ''
   @State pageVersion: number = 0
+  @StorageLink('performance_changed_version') @Watch('onPerformanceDataChanged') performanceChangedVersion: number = 0
+  private isPageVisible: boolean = false
+  private pendingExternalRefresh: boolean = false
 
   aboutToAppear(): void {
     WindowImmersiveUtil.apply(this, '#F5F5F5', '#F5F5F5')
+    this.isPageVisible = true
     const params = router.getParams() as SearchResultRouteParams
     const keyword: string = params.keyword ?? ''
-    const userId: string = params.userId ?? 'user_001'
+    const userId: string = params.userId ?? '1'
 
     if (keyword.trim().length === 0) {
       this.vm.errorMessage = '请输入搜索关键词'
@@ -35,15 +39,31 @@ struct SearchResultPage {
       return
     }
 
-    this.vm.initPage(keyword, userId)
-    this.syncFromVm()
+    this.initPage(keyword, userId)
   }
 
   onPageShow(): void {
     WindowImmersiveUtil.apply(this, '#F5F5F5', '#F5F5F5')
-    // 页面交互文档要求来源页返回时刷新。城市入口已从搜索结果页移除，
-    // 但如果全局城市在别处变化，仍按当前关键词重新加载搜索结果。
-    this.vm.reloadIfCityChanged()
+    this.isPageVisible = true
+    this.pendingExternalRefresh = false
+    this.refreshCurrentSearch()
+  }
+
+  onPageHide(): void {
+    this.isPageVisible = false
+  }
+
+  private onPerformanceDataChanged(): void {
+    if (!this.isPageVisible) {
+      this.pendingExternalRefresh = true
+      return
+    }
+    this.refreshCurrentSearch()
+  }
+
+  private async refreshCurrentSearch(): Promise<void> {
+    if (this.vm.keyword.length === 0) return
+    await this.vm.refresh()
     this.syncFromVm()
   }
 
@@ -137,7 +157,7 @@ struct SearchResultPage {
           ListItem() {
             this.ResultCard(item)
           }
-        }, (item: SearchResultItemVO) => item.projectId + item.sessionId)
+        }, (item: SearchResultItemVO) => item.projectId + '_' + item.sessionId + '_' + item.startTime + '_' + String(item.minPrice) + '_' + String(item.maxPrice) + '_' + String(this.pageVersion))
 
         ListItem() {
           this.LoadMoreArea()
@@ -226,8 +246,7 @@ struct SearchResultPage {
           .fontColor('#999999')
           .padding(16)
           .onClick(() => {
-            this.vm.loadMore()
-            this.syncFromVm()
+            this.handleLoadMore()
           })
       } else {
         Text('已经到底了')
@@ -239,7 +258,7 @@ struct SearchResultPage {
     .width('100%')
   }
 
-  private searchAgain(): void {
+  private async searchAgain(): Promise<void> {
     const keyword: string = this.inputKeyword.trim()
 
     if (keyword.length === 0) {
@@ -248,12 +267,22 @@ struct SearchResultPage {
     }
 
     this.vm.changeInputKeyword(keyword)
-    this.vm.searchAgain()
+    await this.vm.searchAgain()
     this.syncFromVm()
 
     if (this.errorMessage.length > 0) {
       promptAction.showToast({ message: this.errorMessage })
     }
+  }
+
+  private async initPage(keyword: string, userId: string): Promise<void> {
+    await this.vm.initPage(keyword, userId)
+    this.syncFromVm()
+  }
+
+  private async handleLoadMore(): Promise<void> {
+    await this.vm.loadMore()
+    this.syncFromVm()
   }
 
   private getPriceText(item: SearchResultItemVO): string {
@@ -270,7 +299,7 @@ struct SearchResultPage {
 
   private syncFromVm(): void {
     this.inputKeyword = this.vm.inputKeyword
-    this.resultList = this.vm.resultList
+    this.resultList = this.vm.resultList.slice()
     this.hasMore = this.vm.hasMore
     this.isLoading = this.vm.isLoading
     this.errorMessage = this.vm.errorMessage

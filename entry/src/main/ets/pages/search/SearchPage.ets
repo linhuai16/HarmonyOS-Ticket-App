@@ -18,15 +18,13 @@ export struct SearchPage {
 
   aboutToAppear(): void {
     WindowImmersiveUtil.apply(this, '#F5F5F5', '#F5F5F5')
-    this.vm.initSearchPage()
-    this.syncFromVm()
+    this.initSearchPage()
   }
 
   onPageShow(): void {
     WindowImmersiveUtil.apply(this, '#F5F5F5', '#F5F5F5')
     // 从搜索结果页返回时，重新读取搜索历史，保证历史排行按照最近搜索时间刷新。
-    this.vm.loadSearchHistory()
-    this.syncFromVm()
+    this.reloadSearchHistory()
   }
 
   build() {
@@ -117,8 +115,7 @@ export struct SearchPage {
             .fontSize(13)
             .fontColor('#999999')
             .onClick(() => {
-              this.vm.clearHistory()
-              this.syncFromVm()
+              this.clearHistory()
             })
         }
       }
@@ -172,8 +169,7 @@ export struct SearchPage {
         .fontColor('#999999')
         .margin({ left: 4 })
         .onClick(() => {
-          this.vm.deleteHistory(item.historyId)
-          this.syncFromVm()
+          this.deleteHistory(item.historyId)
         })
     }
     .width('30%')
@@ -209,15 +205,15 @@ export struct SearchPage {
     return $r('app.media.xiala')
   }
 
-  private searchByHistory(keyword: string): void {
-    const result: string = this.vm.searchByHistory(keyword)
+  private async searchByHistory(keyword: string): Promise<void> {
+    const result: string = await this.vm.searchByHistory(keyword)
     this.syncFromVm()
     this.jumpToSearchResult(result)
   }
 
-  private doSearch(): void {
+  private async doSearch(): Promise<void> {
     this.vm.changeKeyword(this.keyword)
-    const result: string = this.vm.search()
+    const result: string = await this.vm.search()
     this.syncFromVm()
 
     if (result.length === 0) {
@@ -242,6 +238,26 @@ export struct SearchPage {
         userId: this.vm.userId
       }
     })
+  }
+
+  private async initSearchPage(): Promise<void> {
+    await this.vm.initSearchPage()
+    this.syncFromVm()
+  }
+
+  private async reloadSearchHistory(): Promise<void> {
+    await this.vm.loadSearchHistory()
+    this.syncFromVm()
+  }
+
+  private async clearHistory(): Promise<void> {
+    await this.vm.clearHistory()
+    this.syncFromVm()
+  }
+
+  private async deleteHistory(historyId: string): Promise<void> {
+    await this.vm.deleteHistory(historyId)
+    this.syncFromVm()
   }
 
   private syncFromVm(): void {

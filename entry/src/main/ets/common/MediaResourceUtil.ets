@@ -1,12 +1,22 @@
+import { ApiClient } from '../network/ApiClient'
 
-//图片资源映射工具
+// 图片资源映射工具：兼容应用内资源名、完整网络 URL 和后端 /media/** 相对地址。
 export class MediaResourceUtil {
-  static getMedia(name: string | undefined): Resource {
-    if (name === undefined || name.length === 0) {
+  static getMedia(name: string | undefined | null): ResourceStr {
+    const safeName: string = name?.trim() ?? ''
+    if (safeName.length === 0) {
       return $r('app.media.background')
     }
 
-    switch (name) {
+    if (safeName.startsWith('http://') ||
+      safeName.startsWith('https://') ||
+      safeName.startsWith('data:image/') ||
+      safeName.startsWith('/')) {
+      const resolvedUrl: string = ApiClient.resolveMediaUrl(safeName)
+      return resolvedUrl.length > 0 ? resolvedUrl : $r('app.media.background')
+    }
+
+    switch (safeName) {
       case 'yanchanghui':
         return $r('app.media.yanchanghui')
       case 'huajugeju':
@@ -23,7 +33,6 @@ export class MediaResourceUtil {
         return $r('app.media.xiqu')
       case 'wudao':
         return $r('app.media.wudao')
-
       case 'yanchanghui_ZhouJieLunYanchu':
       case 'ZhouJieLunYanchu':
         return $r('app.media.yanchanghui_ZhouJieLunYanchu')
@@ -43,7 +52,6 @@ export class MediaResourceUtil {
         return $r('app.media.xiqu_muDanTingYanchu')
       case 'WujuYanchu':
         return $r('app.media.WujuYanchu')
-
       case 'page_xiangkan':
         return $r('app.media.page_xiangkan')
       case 'page_xiala_shang':

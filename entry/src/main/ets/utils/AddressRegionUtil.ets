@@ -3,6 +3,13 @@ export interface AddressRegionOption {
   name: string
 }
 
+export interface AddressStandardCodes {
+  countryCode: string
+  provinceCode: string
+  cityCode: string
+  areaCode: string
+}
+
 interface AddressRegionRawItem {
   code: string
   name: string
@@ -3290,6 +3297,32 @@ export class AddressRegionUtil {
 
   static getDistrictNames(provinceName: string, cityName: string): string[] {
     return AddressRegionUtil.optionsToNames(AddressRegionUtil.getDistrictOptions(provinceName, cityName))
+  }
+
+  /** 将当前地址选择器的省/市/区名称解析成 V1.2 要求的标准行政区编码。 */
+  static resolveStandardCodes(provinceName: string, cityName: string, districtName: string): AddressStandardCodes | undefined {
+    const province: AddressRegionRawItem | undefined = AddressRegionUtil.findProvinceByName(provinceName)
+    if (province === undefined) {
+      return undefined
+    }
+    const cityCodePart: string = AddressRegionUtil.resolveCityCode(province, cityName)
+    if (cityCodePart.length === 0) {
+      return undefined
+    }
+    const normalizedDistrictName: string = districtName.trim()
+    const district: AddressRegionRawItem | undefined = ADDRESS_REGION_RAW_LIST.find((item: AddressRegionRawItem): boolean => {
+      return item.provinceCode === province.provinceCode && item.cityCode === cityCodePart &&
+        item.areaCode.length > 0 && item.name === normalizedDistrictName
+    })
+    if (district === undefined) {
+      return undefined
+    }
+    return {
+      countryCode: 'CN',
+      provinceCode: province.code,
+      cityCode: province.provinceCode + cityCodePart + '00',
+      areaCode: district.code
+    }
   }
 
   static isValidProvinceName(provinceName: string): boolean {

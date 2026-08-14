@@ -28,7 +28,7 @@ export class TicketSelectViewModel {
 
   private performanceRepository: PerformanceRepository = new PerformanceRepository()
 
-  loadPage(projectId: string, selectedSessionId: string): void {
+  async loadPage(projectId: string, selectedSessionId: string): Promise<void> {
     this.isLoading = true
     this.errorMessage = ''
 
@@ -38,19 +38,22 @@ export class TicketSelectViewModel {
     this.quantity = 1
     this.totalAmount = 0
 
-    const pageVO: TicketSelectPageVO | undefined =
-      this.performanceRepository.getTicketSelectPage(projectId, selectedSessionId)
+    try {
+      const pageVO: TicketSelectPageVO | undefined =
+        await this.performanceRepository.getTicketSelectPage(projectId, selectedSessionId)
 
-    if (pageVO === undefined) {
-      this.errorMessage = '票档数据不存在'
+      if (pageVO === undefined) {
+        this.errorMessage = '票档数据不存在'
+        return
+      }
+
+      this.pageVO = pageVO
+      this.selectedSessionId = pageVO.session.sessionId
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '票档数据加载失败'
+    } finally {
       this.isLoading = false
-      return
     }
-
-    this.pageVO = pageVO
-    this.selectedSessionId = pageVO.session.sessionId
-
-    this.isLoading = false
   }
 
   selectSku(skuId: string): void {
@@ -215,10 +218,13 @@ export class TicketSelectViewModel {
       return 1
     }
 
-    const stockAvailable: number = sku.stockAvailable ?? this.pageVO.limitPerOrder
+    // V1.2: 未返回精确库存不等于售罄。未知库存时仅受场次限购约束，最终由第三方计价/建单确认。
+    if (sku.stockAvailable === undefined) {
+      return this.pageVO.limitPerOrder
+    }
 
-    if (stockAvailable < this.pageVO.limitPerOrder) {
-      return stockAvailable
+    if (sku.stockAvailable < this.pageVO.limitPerOrder) {
+      return sku.stockAvailable
     }
 
     return this.pageVO.limitPerOrder
@@ -229,6 +235,7 @@ export class TicketSelectViewModel {
       return false
     }
 
-    return (sku.stockAvailable ?? 0) > 0
+    // undefined 表示第三方未知精确库存，不得按 0 或售罄处理。
+    return sku.stockAvailable === undefined || sku.stockAvailable > 0
   }
 }

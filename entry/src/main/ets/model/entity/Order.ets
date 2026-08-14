@@ -27,6 +27,18 @@ export interface Order {
   /** 订单状态 */
   orderStatus: OrderStatus
 
+  /** 票款金额 */
+  ticketAmount: number
+
+  /** 服务费 */
+  serviceFeeAmount: number
+
+  /** 配送费 */
+  deliveryFeeAmount: number
+
+  /** 优惠金额 */
+  discountAmount: number
+
   /** 订单总金额 */
   totalAmount: number
 
@@ -50,6 +62,9 @@ export interface Order {
 
   /** 取消时间 */
   cancelTime?: string
+
+  /** 订单最后更新时间 */
+  updateTime?: string
 
   /** 实际出票时间，多张票通常同一批出票 */
   ticketIssuedTime?: string

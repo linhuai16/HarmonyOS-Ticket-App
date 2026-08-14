@@ -40,7 +40,7 @@ struct AddressPage {
     this.reloadAddressList()
   }
 
-  private reloadAddressList(): void {
+  private async reloadAddressList(): Promise<void> {
     if (!this.userRepository.isLogin()) {
       router.pushUrl({ url: 'pages/user/LoginPage' })
       return
@@ -53,11 +53,11 @@ struct AddressPage {
       return
     }
 
-    this.vm.loadList(effectiveUserId)
+    await this.vm.loadList(effectiveUserId)
     this.syncFromVm()
   }
 
-  private loadPageData(): void {
+  private async loadPageData(): Promise<void> {
     const params: AddressRouteParams = (router.getParams() ?? {}) as AddressRouteParams
     const routeUserId: string = params.userId ?? ''
     const currentUserId: string = this.userRepository.getCurrentUserId().trim()
@@ -68,7 +68,7 @@ struct AddressPage {
       return
     }
 
-    this.vm.loadList(userId)
+    await this.vm.loadList(userId)
     this.syncFromVm()
   }
 
@@ -122,6 +122,13 @@ struct AddressPage {
         .margin({ left: 8 })
 
       Blank()
+      Text('刷新')
+        .fontSize(14)
+        .fontColor('#E33B3B')
+        .height(44)
+        .padding({ left: 10, right: 4 })
+        .textAlign(TextAlign.Center)
+        .onClick(() => { this.loadPageData() })
     }
     .width('100%')
     .height(52)
@@ -131,7 +138,11 @@ struct AddressPage {
 
   @Builder
   private ListArea() {
-    if (this.addressList.length === 0) {
+    if (this.isLoading && this.addressList.length === 0) {
+      this.LoadingArea('正在加载收货地址...')
+    } else if (this.addressList.length === 0 && this.errorMessage.length > 0) {
+      this.ErrorArea(this.errorMessage)
+    } else if (this.addressList.length === 0) {
       Column() {
         Text('暂无收货地址')
           .fontSize(15)
@@ -154,6 +165,49 @@ struct AddressPage {
       .layoutWeight(1)
       .padding({ left: 12, right: 12, top: 8 })
     }
+  }
+
+  @Builder
+  private LoadingArea(message: string) {
+    Column() {
+      LoadingProgress()
+        .width(32)
+        .height(32)
+        .color('#E33B3B')
+
+      Text(message)
+        .fontSize(14)
+        .fontColor('#999999')
+        .margin({ top: 12 })
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  private ErrorArea(message: string) {
+    Column() {
+      Text(message)
+        .fontSize(15)
+        .fontColor('#E33B3B')
+        .textAlign(TextAlign.Center)
+        .padding({ left: 24, right: 24 })
+
+      Text('点击重试')
+        .fontSize(14)
+        .fontColor('#FFFFFF')
+        .padding({ left: 18, right: 18, top: 8, bottom: 8 })
+        .margin({ top: 14 })
+        .backgroundColor('#E33B3B')
+        .borderRadius(18)
+        .onClick(() => {
+          this.reloadAddressList()
+        })
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
   }
 
   @Builder
@@ -276,8 +330,8 @@ struct AddressPage {
     })
   }
 
-  private setDefaultAddress(addressId: string): void {
-    const success: boolean = this.vm.setDefaultAddress(addressId)
+  private async setDefaultAddress(addressId: string): Promise<void> {
+    const success: boolean = await this.vm.setDefaultAddress(addressId)
     this.syncFromVm()
 
     promptAction.showToast({
@@ -302,8 +356,8 @@ struct AddressPage {
     })
   }
 
-  private deleteAddress(addressId: string): void {
-    const success: boolean = this.vm.deleteAddress(addressId)
+  private async deleteAddress(addressId: string): Promise<void> {
+    const success: boolean = await this.vm.deleteAddress(addressId)
     this.syncFromVm()
 
     promptAction.showToast({

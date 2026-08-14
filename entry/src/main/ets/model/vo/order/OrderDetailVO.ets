@@ -19,6 +19,7 @@ export interface OrderDetailVO {
   audiences: OrderDetailAudienceVO[]
 
   deliveryType: DeliveryType
+  deliveryMode?: string
   address?: OrderDetailAddressVO
 
   createTime: string

@@ -5,15 +5,14 @@ import {
 
 import { SearchRepository } from '../repository/SearchRepository'
 
-const MOCK_USER_ID: string = 'user_001'
+const DEFAULT_USER_ID: string = '1'
 const COLLAPSED_HISTORY_COUNT: number = 9
+
 /**
-    搜索历史
-    关键词输入
-    搜索跳转
+ * 搜索页 ViewModel。
  */
 export class SearchViewModel {
-  userId: string = MOCK_USER_ID
+  userId: string = DEFAULT_USER_ID
   keyword: string = ''
   histories: SearchHistoryItemVO[] = []
 
@@ -24,10 +23,9 @@ export class SearchViewModel {
 
   isHistoryExpanded: boolean = false
 
-
-  initSearchPage(userId: string = MOCK_USER_ID): void {
+  async initSearchPage(userId: string = DEFAULT_USER_ID): Promise<void> {
     this.userId = userId
-    this.loadSearchHistory()
+    await this.loadSearchHistory()
   }
 
   canSearch(): boolean {
@@ -55,7 +53,7 @@ export class SearchViewModel {
     this.isHistoryExpanded = !this.isHistoryExpanded
   }
 
-  loadSearchHistory(): void {
+  async loadSearchHistory(): Promise<void> {
     if (this.isLoading) {
       return
     }
@@ -63,20 +61,24 @@ export class SearchViewModel {
     this.isLoading = true
     this.errorMessage = ''
 
-    const pageVO: SearchPageVO = this.searchRepository.getSearchPage(this.userId)
-
-    this.histories = pageVO.histories
-    if (!this.hasMoreHistories()) {
-      this.isHistoryExpanded = false
+    try {
+      const pageVO: SearchPageVO = await this.searchRepository.getSearchPage(this.userId)
+      this.histories = pageVO.histories
+      if (!this.hasMoreHistories()) {
+        this.isHistoryExpanded = false
+      }
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '搜索历史加载失败'
+    } finally {
+      this.isLoading = false
     }
-    this.isLoading = false
   }
 
   changeKeyword(keyword: string): void {
     this.keyword = keyword
   }
 
-  search(): string {
+  async search(): Promise<string> {
     const realKeyword: string = this.keyword.trim()
 
     if (realKeyword.length === 0) {
@@ -84,14 +86,14 @@ export class SearchViewModel {
       return ''
     }
 
-    this.searchRepository.saveSearchHistory(realKeyword, this.userId)
+    await this.searchRepository.saveSearchHistory(realKeyword, this.userId)
     this.keyword = realKeyword
-    this.loadSearchHistory()
+    await this.loadSearchHistory()
 
     return realKeyword
   }
 
-  searchByHistory(keyword: string): string {
+  async searchByHistory(keyword: string): Promise<string> {
     const realKeyword: string = keyword.trim()
 
     if (realKeyword.length === 0) {
@@ -99,25 +101,25 @@ export class SearchViewModel {
     }
 
     this.keyword = realKeyword
-    this.searchRepository.saveSearchHistory(realKeyword, this.userId)
-    this.loadSearchHistory()
+    await this.searchRepository.saveSearchHistory(realKeyword, this.userId)
+    await this.loadSearchHistory()
 
     return realKeyword
   }
 
-  deleteHistory(historyId: string): void {
+  async deleteHistory(historyId: string): Promise<void> {
     if (historyId.length === 0) {
       return
     }
 
-    this.searchRepository.deleteSearchHistory(historyId)
-    this.loadSearchHistory()
+    await this.searchRepository.deleteSearchHistory(historyId, this.userId)
+    await this.loadSearchHistory()
   }
 
-  clearHistory(): void {
-    this.searchRepository.clearSearchHistory(this.userId)
+  async clearHistory(): Promise<void> {
+    await this.searchRepository.clearSearchHistory(this.userId)
     this.isHistoryExpanded = false
-    this.loadSearchHistory()
+    await this.loadSearchHistory()
   }
 
   clearKeyword(): void {

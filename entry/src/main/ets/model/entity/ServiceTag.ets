@@ -14,8 +14,11 @@ export interface ServiceTag {
   tagName: string
 
   /** 服务标签图标资源名 */
-  iconUrl: string
+  iconUrl?: string
 
   /** 服务标签说明，用于点击标签后的说明弹窗 */
   description: string
+
+  /** 标签分类 */
+  tagType?: string
 }

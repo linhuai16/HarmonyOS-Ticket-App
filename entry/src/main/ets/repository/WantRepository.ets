@@ -2,114 +2,92 @@ import {
   WantListPageVO,
   WantPerformanceItemVO
 } from '../model/vo/want/WantListPageVO'
+import { ProjectStatus } from '../model/enums/ProjectStatus'
+import { SessionStatus } from '../model/enums/SessionStatus'
+import { ApiClient } from '../network/ApiClient'
+import { AppStorageVersionUtil } from '../utils/AppStorageVersionUtil'
 
-import { WantRecord } from '../model/entity/WantRecord'
-import { PerformanceProject } from '../model/entity/PerformanceProject'
-import { PerformanceSession } from '../model/entity/PerformanceSession'
-import { PerformanceDataUtil } from '../utils/PerformanceDataUtil'
-import { WantDataUtil } from '../utils/WantDataUtil'
+interface BackendWantListPageVO {
+  wants?: BackendWantItemVO[]
+  items?: BackendWantItemVO[]
+}
 
-/**
- * 想看 Repository。
- *
- * 对外保留想看列表、添加想看、取消想看、想看状态判断；
- * 基础查找、时间排序、默认场次选择、想看数量维护统一复用 WantDataUtil / PerformanceDataUtil。
- */
+interface BackendWantItemVO {
+  wantId: number | string
+  projectId: number | string
+  sessionId?: number | string
+  posterUrl: string
+  categoryName: string
+  title: string
+  startTime?: string
+  venueName?: string
+  minPrice?: number
+  projectStatus?: string
+  sessionStatus?: string
+}
+
+interface WantActionResponse {
+  success: boolean
+  isWanted?: boolean
+}
+
+/** 想看 Repository：从 SpringBoot 接口读写，不再使用 Mock。 */
 export class WantRepository {
-  getWantList(userId: string): WantListPageVO {
-    const items: WantPerformanceItemVO[] = []
+  async getWantList(userId: string): Promise<WantListPageVO> {
+    if (userId.length === 0) {
+      return { items: [] }
+    }
 
-    WantDataUtil.getUserWantRecords(userId).forEach((want: WantRecord) => {
-      const item: WantPerformanceItemVO | undefined = this.buildWantPerformanceItemVO(want)
+    const response: BackendWantListPageVO =
+      await ApiClient.get<BackendWantListPageVO>('/api/users/' + encodeURIComponent(userId) + '/wants')
 
-      if (item !== undefined) {
-        items.push(item)
+    const rawItems: BackendWantItemVO[] = response.items ?? response.wants ?? []
+    const items: WantPerformanceItemVO[] = rawItems.map((item: BackendWantItemVO): WantPerformanceItemVO => {
+      return {
+        wantId: String(item.wantId),
+        projectId: String(item.projectId),
+        sessionId: item.sessionId === undefined ? '' : String(item.sessionId),
+        posterUrl: item.posterUrl,
+        categoryName: item.categoryName,
+        title: item.title,
+        startTime: item.startTime ?? '',
+        venueName: item.venueName ?? '',
+        minPrice: item.minPrice,
+        projectStatus: (item.projectStatus ?? ProjectStatus.ON_SALE) as ProjectStatus,
+        sessionStatus: (item.sessionStatus ?? SessionStatus.ON_SALE) as SessionStatus
       }
     })
 
-    return {
-      items: items
-    }
+    return { items: items }
   }
 
-  addWant(userId: string, projectId: string): boolean {
-    if (userId.trim().length === 0 || projectId.trim().length === 0) {
+  async addWant(userId: string, projectId: string): Promise<boolean> {
+    if (userId.length === 0 || projectId.length === 0) {
       return false
     }
 
-    const project: PerformanceProject | undefined = PerformanceDataUtil.findProject(projectId)
+    const response: WantActionResponse =
+      await ApiClient.post<WantActionResponse>('/api/users/' + encodeURIComponent(userId) + '/wants/' + encodeURIComponent(projectId))
 
-    if (!WantDataUtil.canAddWant(project)) {
-      return false
+    if (response.success) {
+      AppStorageVersionUtil.bumpWantChangedVersion()
+      AppStorageVersionUtil.bumpUserCenterChangedVersion()
     }
-
-    if (WantDataUtil.isWanted(userId, projectId)) {
-      return true
-    }
-
-    WantDataUtil.addWantRecord(userId, projectId)
-
-    if (project !== undefined) {
-      WantDataUtil.increaseProjectWantCount(project)
-    }
-
-    return true
+    return response.success
   }
 
-  cancelWant(userId: string, projectId: string): boolean {
-    if (userId.trim().length === 0 || projectId.trim().length === 0) {
+  async cancelWant(userId: string, projectId: string): Promise<boolean> {
+    if (userId.length === 0 || projectId.length === 0) {
       return false
     }
 
-    const index: number = WantDataUtil.findWantRecordIndex(userId, projectId)
+    const response: WantActionResponse =
+      await ApiClient.delete<WantActionResponse>('/api/users/' + encodeURIComponent(userId) + '/wants/' + encodeURIComponent(projectId))
 
-    if (index < 0) {
-      return false
+    if (response.success) {
+      AppStorageVersionUtil.bumpWantChangedVersion()
+      AppStorageVersionUtil.bumpUserCenterChangedVersion()
     }
-
-    WantDataUtil.removeWantRecordAt(index)
-    WantDataUtil.decreaseProjectWantCount(PerformanceDataUtil.findProject(projectId))
-
-    return true
-  }
-
-  isWanted(userId: string, projectId: string): boolean {
-    if (userId.trim().length === 0 || projectId.trim().length === 0) {
-      return false
-    }
-
-    return WantDataUtil.isWanted(userId, projectId)
-  }
-
-  private buildWantPerformanceItemVO(want: WantRecord): WantPerformanceItemVO | undefined {
-    const project: PerformanceProject | undefined = PerformanceDataUtil.findProject(want.projectId)
-
-    if (!WantDataUtil.canAddWant(project)) {
-      return undefined
-    }
-
-    if (project === undefined) {
-      return undefined
-    }
-
-    const session: PerformanceSession | undefined = WantDataUtil.findDefaultVisibleSession(project.projectId)
-
-    if (session === undefined) {
-      return undefined
-    }
-
-    return {
-      wantId: want.wantId,
-      projectId: project.projectId,
-      sessionId: session.sessionId,
-      posterUrl: project.posterUrl,
-      categoryName: PerformanceDataUtil.getCategoryName(project.categoryId),
-      title: project.title,
-      startTime: session.startTime,
-      venueName: PerformanceDataUtil.getVenueName(session.venueId),
-      minPrice: session.minPrice ?? project.minPrice,
-      projectStatus: project.projectStatus,
-      sessionStatus: session.sessionStatus
-    }
+    return response.success
   }
 }

@@ -1,5 +1,6 @@
 import router from '@ohos.router'
-import promptAction from '@ohos.promptAction'
+import { webview } from '@kit.ArkWeb'
+import { common } from '@kit.AbilityKit'
 
 import {
   PerformanceDetailVO,
@@ -13,7 +14,10 @@ import { PerformanceDetailViewModel } from '../../viewmodel/PerformanceDetailVie
 import { SessionStatus } from '../../model/enums/SessionStatus'
 import { MediaResourceUtil } from '../../common/MediaResourceUtil'
 import { UserRepository } from '../../repository/UserRepository'
+import { CityRepository } from '../../repository/CityRepository'
 import { WindowImmersiveUtil } from '../../common/WindowImmersiveUtil'
+import { RichTextHtmlUtil } from '../../common/RichTextHtmlUtil'
+import { VenueNavigationUtil } from '../../utils/VenueNavigationUtil'
 interface DetailRouteParams {
   projectId?: string
   sessionId?: string
@@ -26,6 +30,8 @@ interface DetailRouteParams {
 export struct PerformanceDetailPage {
   private vm: PerformanceDetailViewModel = new PerformanceDetailViewModel()
   private userRepository: UserRepository = new UserRepository()
+  private cityRepository: CityRepository = new CityRepository()
+  private detailWebController: webview.WebviewController = new webview.WebviewController()
 
   @State detailVO: PerformanceDetailVO | undefined = undefined
   @State pageVersion: number = 0
@@ -38,41 +44,43 @@ export struct PerformanceDetailPage {
   @State selectedMaxPrice: number | undefined = undefined
   @State selectedVenueName: string = ''
   @State selectedVenueAddress: string = ''
+  @State selectedVenueLongitude: number = 0
+  @State selectedVenueLatitude: number = 0
+  @State hasSelectedVenueCoordinate: boolean = false
   @State selectedDetailContent: string = ''
   @State errorMessage: string = ''
   @State isLoading: boolean = false
+  @State isRefreshingPage: boolean = false
+  @StorageLink('performance_changed_version') @Watch('onPerformanceDataChanged') performanceChangedVersion: number = 0
+  @StorageLink('want_changed_version') @Watch('onPerformanceDataChanged') wantChangedVersion: number = 0
+  @StorageLink('login_version') @Watch('onPerformanceDataChanged') loginVersion: number = 0
+  private isPageVisible: boolean = false
+  private pendingExternalRefresh: boolean = false
 
   aboutToAppear(): void {
     WindowImmersiveUtil.applyLight(this)
+    this.isPageVisible = true
     const params = router.getParams() as DetailRouteParams
-
-    const projectId: string = params.projectId ?? ''
-    const sessionId: string = params.sessionId ?? ''
-    const userId: string = params.userId ?? this.getCurrentUserId()
-
-    if (projectId.length === 0) {
-      this.vm.errorMessage = '演出项目不存在'
-      this.syncFromVm()
-      return
-    }
-
-    if (sessionId.length > 0) {
-      this.vm.loadDetail(projectId, sessionId, userId)
-    } else {
-      this.vm.loadDetailByProject(projectId, userId)
-    }
-
-    this.syncFromVm()
+    this.initPage(params)
   }
 
   onPageShow(): void {
     WindowImmersiveUtil.applyLight(this)
-    const currentUserId: string = this.getCurrentUserId()
+    this.isPageVisible = true
+    this.pendingExternalRefresh = false
+    this.reloadCurrentDetail()
+  }
 
-    if (this.vm.projectId.length > 0 && this.vm.getSelectedSessionId().length > 0) {
-      this.vm.loadDetail(this.vm.projectId, this.vm.getSelectedSessionId(), currentUserId)
-      this.syncFromVm()
+  onPageHide(): void {
+    this.isPageVisible = false
+  }
+
+  private onPerformanceDataChanged(): void {
+    if (!this.isPageVisible) {
+      this.pendingExternalRefresh = true
+      return
     }
+    this.reloadCurrentDetail()
   }
 
   build() {
@@ -86,12 +94,12 @@ export struct PerformanceDetailPage {
         } else {
           Scroll() {
             Column() {
-              this.ProjectInfo(this.detailVO)
-              this.SessionArea(this.detailVO)
+              this.ProjectInfo()
+              this.SessionArea()
               this.VenueArea()
-              this.ServiceTagArea(this.detailVO)
+              this.ServiceTagArea()
               this.DetailContentArea()
-              this.NoticeArea(this.detailVO)
+              this.NoticeArea()
               Blank().height(80)
             }
             .width('100%')
@@ -132,6 +140,15 @@ export struct PerformanceDetailPage {
         .margin({ left: 4 })
 
       Blank()
+      Text(this.isRefreshingPage ? '刷新中' : '刷新')
+        .fontSize(14)
+        .fontColor(this.isRefreshingPage ? '#BBBBBB' : '#E33B3B')
+        .height(44)
+        .padding({ left: 10, right: 4 })
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          if (!this.isRefreshingPage) this.manualRefreshDetail()
+        })
     }
     .width('100%')
     .height(52)
@@ -152,16 +169,16 @@ export struct PerformanceDetailPage {
   }
 
   @Builder
-  private ProjectInfo(detail: PerformanceDetailVO) {
+  private ProjectInfo() {
     Row() {
       Stack({ alignContent: Alignment.TopStart }) {
-        Image(MediaResourceUtil.getMedia(detail.posterUrl))
+        Image(MediaResourceUtil.getMedia((this.detailVO as PerformanceDetailVO).posterUrl))
           .width(118)
           .height(158)
           .objectFit(ImageFit.Cover)
           .borderRadius(10)
 
-        Text(detail.categoryName)
+        Text((this.detailVO as PerformanceDetailVO).categoryName)
           .fontSize(11)
           .fontColor('#FFFFFF')
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
@@ -170,7 +187,7 @@ export struct PerformanceDetailPage {
       }
 
       Column() {
-        Text(detail.title)
+        Text((this.detailVO as PerformanceDetailVO).title)
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
           .fontColor('#222222')
@@ -203,7 +220,7 @@ export struct PerformanceDetailPage {
   }
 
   @Builder
-  private SessionArea(detail: PerformanceDetailVO) {
+  private SessionArea() {
     Column() {
       Text('场次选择')
         .fontSize(17)
@@ -213,7 +230,7 @@ export struct PerformanceDetailPage {
 
       Scroll() {
         Row() {
-          ForEach(detail.sessions, (item: PerformanceSessionItemVO) => {
+          ForEach((this.detailVO as PerformanceDetailVO).sessions, (item: PerformanceSessionItemVO) => {
             Column() {
               Text(item.stationName)
                 .fontSize(14)
@@ -243,10 +260,9 @@ export struct PerformanceDetailPage {
             .alignItems(HorizontalAlign.Start)
             .justifyContent(FlexAlign.Center)
             .onClick(() => {
-              this.vm.changeSession(item.sessionId)
-              this.syncFromVm()
+              this.handleChangeSession(item.sessionId)
             })
-          }, (item: PerformanceSessionItemVO) => item.sessionId)
+          }, (item: PerformanceSessionItemVO) => item.sessionId + '_' + item.sessionStatus + '_' + item.cityName + '_' + item.stationName + '_' + item.startTime + '_' + String(this.pageVersion))
         }
         .justifyContent(FlexAlign.Start)
         .alignItems(VerticalAlign.Top)
@@ -285,14 +301,17 @@ export struct PerformanceDetailPage {
     .backgroundColor('#FFFFFF')
     .borderRadius(12)
     .onClick(() => {
-      promptAction.showToast({ message: '地图导航一期暂未接入' })
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext
+      VenueNavigationUtil.open(context, this.selectedVenueName, this.selectedVenueAddress,
+        this.hasSelectedVenueCoordinate ? this.selectedVenueLatitude : undefined,
+        this.hasSelectedVenueCoordinate ? this.selectedVenueLongitude : undefined)
     })
   }
 
   @Builder
-  private ServiceTagArea(detail: PerformanceDetailVO) {
+  private ServiceTagArea() {
     Flex({ wrap: FlexWrap.Wrap }) {
-      ForEach(detail.serviceTags, (item: ServiceTagVO) => {
+      ForEach((this.detailVO as PerformanceDetailVO).serviceTags, (item: ServiceTagVO) => {
         Row() {
           if (item.iconUrl !== undefined) {
             Image(MediaResourceUtil.getMedia(item.iconUrl))
@@ -330,12 +349,16 @@ export struct PerformanceDetailPage {
         .fontColor('#222222')
         .width('100%')
 
-      Text(this.selectedDetailContent.length > 0 ? this.selectedDetailContent : '暂无演出详情')
-        .fontSize(14)
-        .fontColor('#555555')
-        .lineHeight(22)
-        .margin({ top: 10 })
+      Web({
+        src: RichTextHtmlUtil.buildDataUrl(this.selectedDetailContent),
+        controller: this.detailWebController
+      })
         .width('100%')
+        .height(RichTextHtmlUtil.estimateHeight(this.selectedDetailContent))
+        .margin({ top: 8 })
+        .javaScriptAccess(false)
+        .domStorageAccess(false)
+        .zoomAccess(false)
     }
     .alignItems(HorizontalAlign.Start)
     .width('100%')
@@ -346,7 +369,7 @@ export struct PerformanceDetailPage {
   }
 
   @Builder
-  private NoticeArea(detail: PerformanceDetailVO) {
+  private NoticeArea() {
     Column() {
       Text('观演须知')
         .fontSize(17)
@@ -355,7 +378,7 @@ export struct PerformanceDetailPage {
         .width('100%')
 
       Grid() {
-        ForEach(detail.noticeItems, (item: NoticeItemVO) => {
+        ForEach((this.detailVO as PerformanceDetailVO).noticeItems, (item: NoticeItemVO) => {
           GridItem() {
             Column() {
               Row() {
@@ -437,7 +460,7 @@ export struct PerformanceDetailPage {
         }
 
         this.vm.userId = currentUserId
-        this.vm.toggleWant()
+        this.toggleWant()
         this.syncFromVm()
       })
 
@@ -485,6 +508,48 @@ export struct PerformanceDetailPage {
     })
   }
 
+  private async initPage(params: DetailRouteParams): Promise<void> {
+    const projectId: string = params.projectId ?? ''
+    const sessionId: string = params.sessionId ?? ''
+    const userId: string = params.userId ?? this.getCurrentUserId()
+    const cityName: string = this.cityRepository.getCurrentCity()
+
+    if (projectId.length === 0) {
+      this.vm.errorMessage = '演出项目不存在'
+      this.syncFromVm()
+      return
+    }
+
+    if (sessionId.length > 0) {
+      await this.vm.loadDetail(projectId, cityName, sessionId, userId)
+    } else {
+      await this.vm.loadDetailByProject(projectId, cityName, userId)
+    }
+
+    this.syncFromVm()
+  }
+
+  private async reloadCurrentDetail(): Promise<void> {
+    const currentUserId: string = this.getCurrentUserId()
+
+    if (this.vm.projectId.length > 0 && this.vm.getSelectedSessionId().length > 0) {
+      await this.vm.loadDetail(this.vm.projectId, this.cityRepository.getCurrentCity(), this.vm.getSelectedSessionId(), currentUserId)
+      this.syncFromVm()
+    }
+  }
+
+  private async manualRefreshDetail(): Promise<void> {
+    if (this.isRefreshingPage) return
+    this.isRefreshingPage = true
+    await this.reloadCurrentDetail()
+    this.isRefreshingPage = false
+  }
+
+  private async handleChangeSession(sessionId: string): Promise<void> {
+    await this.vm.changeSession(sessionId, this.cityRepository.getCurrentCity())
+    this.syncFromVm()
+  }
+
   private getCurrentUserId(): string {
     const user = this.userRepository.getCurrentUser()
     return user?.userId ?? ''
@@ -524,6 +589,9 @@ export struct PerformanceDetailPage {
     this.selectedMaxPrice = detail?.maxPrice
     this.selectedVenueName = detail?.venue.venueName ?? ''
     this.selectedVenueAddress = detail?.venue.venueAddress ?? ''
+    this.hasSelectedVenueCoordinate = detail?.venue.latitude !== undefined && detail?.venue.longitude !== undefined
+    this.selectedVenueLatitude = detail?.venue.latitude ?? 0
+    this.selectedVenueLongitude = detail?.venue.longitude ?? 0
     this.selectedDetailContent = detail?.detailContent ?? ''
     this.isWanted = detail?.isWanted ?? false
     this.canBuy = this.vm.canBuyCurrentSession()
@@ -623,4 +691,9 @@ export struct PerformanceDetailPage {
       .height(0)
       .opacity(0)
   }
+  private async toggleWant(): Promise<void> {
+    await this.vm.toggleWant()
+    this.syncFromVm()
+  }
+
 }

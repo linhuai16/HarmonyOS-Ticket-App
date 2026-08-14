@@ -43,4 +43,7 @@ export interface TicketSku {
 
   /** 票档展示排序值 */
   sortOrder?: number
+
+  /** 库存并发版本号，version 不需要返回给页面 VO */
+  version?: number
 }

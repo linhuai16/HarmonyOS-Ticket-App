@@ -15,8 +15,11 @@ export struct MinePage {
   @StorageLink('login_nickname') @Watch('onLoginStateChanged') storageNickname: string = ''
   @StorageLink('login_avatar_url') @Watch('onLoginStateChanged') storageAvatarUrl: string = ''
   @StorageLink('login_version') @Watch('onLoginStateChanged') loginVersion: number = 0
+  @StorageLink('user_center_changed_version') @Watch('onUserCenterChanged') userCenterChangedVersion: number = 0
 
   @State pageVersion: number = 0
+  @State loadedNickname: string = ''
+  @State loadedAvatarUrl: string = ''
 
   aboutToAppear(): void {
     WindowImmersiveUtil.applyMine(this)
@@ -62,15 +65,23 @@ export struct MinePage {
   @Builder
   private UserHeader() {
     Row() {
-      Text(this.getAvatarText())
-        .fontSize(22)
-        .fontColor('#FFFFFF')
-        .fontWeight(FontWeight.Bold)
-        .width(54)
-        .height(54)
-        .textAlign(TextAlign.Center)
-        .backgroundColor(this.getAvatarColor())
-        .borderRadius(27)
+      if (this.hasCustomAvatar()) {
+        Image(this.getAvatarUrl())
+          .width(54)
+          .height(54)
+          .objectFit(ImageFit.Cover)
+          .borderRadius(27)
+      } else {
+        Text(this.getAvatarText())
+          .fontSize(22)
+          .fontColor('#FFFFFF')
+          .fontWeight(FontWeight.Bold)
+          .width(54)
+          .height(54)
+          .textAlign(TextAlign.Center)
+          .backgroundColor(this.getAvatarColor())
+          .borderRadius(27)
+      }
 
       Column() {
         Text(this.getNickname())
@@ -88,12 +99,14 @@ export struct MinePage {
       .layoutWeight(1)
       .margin({ left: 12 })
 
-      Text(this.isLoggedIn() ? '会员' : '去登录')
-        .fontSize(13)
-        .fontColor('#FFFFFF')
-        .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-        .backgroundColor('#F04444')
-        .borderRadius(16)
+      if (!this.isLoggedIn()) {
+        Text('去登录')
+          .fontSize(13)
+          .fontColor('#FFFFFF')
+          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .backgroundColor('#F04444')
+          .borderRadius(16)
+      }
     }
     .width('100%')
     .height(120)
@@ -259,12 +272,18 @@ export struct MinePage {
     })
   }
 
-  private loadCurrentUserAndRefresh(): void {
-    this.vm.loadCurrentUser()
+  private async loadCurrentUserAndRefresh(): Promise<void> {
+    await this.vm.loadCurrentUser()
+    this.loadedNickname = this.vm.user?.nickname ?? ''
+    this.loadedAvatarUrl = this.vm.user?.avatarUrl ?? ''
     this.refreshPage()
   }
 
   private onLoginStateChanged(): void {
+    this.loadCurrentUserAndRefresh()
+  }
+
+  private onUserCenterChanged(): void {
     this.loadCurrentUserAndRefresh()
   }
 
@@ -290,8 +309,8 @@ export struct MinePage {
       return this.storageNickname
     }
 
-    if (this.vm.user !== undefined) {
-      return this.vm.user.nickname ?? '麦麦用户'
+    if (this.loadedNickname.length > 0) {
+      return this.loadedNickname
     }
 
     return '麦麦用户'
@@ -320,8 +339,8 @@ export struct MinePage {
       return this.normalizeAvatarUrl(this.storageAvatarUrl)
     }
 
-    if (this.vm.user !== undefined && this.vm.user.avatarUrl !== undefined) {
-      return this.normalizeAvatarUrl(this.vm.user.avatarUrl)
+    if (this.loadedAvatarUrl.length > 0) {
+      return this.normalizeAvatarUrl(this.loadedAvatarUrl)
     }
 
     return 'default_avatar'
@@ -342,7 +361,13 @@ export struct MinePage {
       return 'mock_avatar_ticket'
     }
 
-    return 'default_avatar'
+    return normalizedAvatarUrl.length > 0 ? normalizedAvatarUrl : 'default_avatar'
+  }
+
+  private hasCustomAvatar(): boolean {
+    const avatarUrl: string = this.getAvatarUrl()
+    return avatarUrl !== 'default_avatar' && avatarUrl !== 'mock_avatar_ticket' &&
+      avatarUrl !== 'mock_avatar_star' && avatarUrl !== 'mock_avatar_me'
   }
 
   private getAvatarColor(): string {

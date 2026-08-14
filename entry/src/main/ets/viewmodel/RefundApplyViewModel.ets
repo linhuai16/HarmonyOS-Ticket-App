@@ -20,7 +20,7 @@ export class RefundApplyViewModel {
 
   private refundRepository: RefundRepository = new RefundRepository()
 
-  loadPage(userId: string, orderId: string): void {
+  async loadPage(userId: string, orderId: string): Promise<void> {
     this.isLoading = true
     this.errorMessage = ''
 
@@ -29,17 +29,24 @@ export class RefundApplyViewModel {
     this.reason = ''
     this.refundResponse = undefined
 
-    const pageVO: RefundApplyPageVO | undefined =
-      this.refundRepository.getRefundApplyPage(userId, orderId)
+    this.pageVO = undefined
 
-    if (pageVO === undefined) {
-      this.errorMessage = '退款申请数据不存在'
+    try {
+      const pageVO: RefundApplyPageVO | undefined =
+        await this.refundRepository.getRefundApplyPage(userId, orderId)
+
+      if (pageVO === undefined) {
+        this.errorMessage = '退款申请数据不存在'
+        this.isLoading = false
+        return
+      }
+
+      this.pageVO = pageVO
       this.isLoading = false
-      return
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '退款申请数据加载失败'
+      this.isLoading = false
     }
-
-    this.pageVO = pageVO
-    this.isLoading = false
   }
 
   changeReason(reason: string): void {
@@ -54,7 +61,7 @@ export class RefundApplyViewModel {
     return this.pageVO.canRefund
   }
 
-  submitRefund(): RefundOrderResponse | undefined {
+  async submitRefund(): Promise<RefundOrderResponse | undefined> {
     if (!this.canSubmit()) {
       this.errorMessage = '当前订单不支持退款'
       return undefined
@@ -69,7 +76,7 @@ export class RefundApplyViewModel {
     }
 
     const response: RefundOrderResponse | undefined =
-      this.refundRepository.refundOrder(this.orderId, request)
+      await this.refundRepository.refundOrder(this.orderId, request)
 
     if (response === undefined) {
       this.errorMessage = '退款申请失败'

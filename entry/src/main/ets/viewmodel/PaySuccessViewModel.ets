@@ -39,37 +39,51 @@ export class PaySuccessViewModel {
     this.userId = userId
     this.orderId = orderId
 
-    let orderDetail: OrderDetailVO | undefined =
-      await this.orderRepository.getOrderDetail(userId, orderId)
+    try {
+      let orderDetail: OrderDetailVO | undefined =
+        await this.orderRepository.getOrderDetail(userId, orderId)
 
-    if (orderDetail === undefined) {
-      this.errorMessage = '支付完成数据不存在'
-      this.isLoading = false
-      return
-    }
-
-    if (orderDetail.orderStatus === OrderStatus.WAIT_PAY) {
-      const payResponse = this.payRepository.mockPaySuccess(orderId, payMethod)
-      if (payResponse === undefined) {
-        this.errorMessage = '支付失败，请确认订单是否超时'
-        this.orderDetailVO = orderDetail
+      if (orderDetail === undefined) {
+        this.errorMessage = '支付完成数据不存在'
         this.isLoading = false
         return
       }
 
-      orderDetail = await this.orderRepository.getOrderDetail(userId, orderId)
-    }
+      if (orderDetail.orderStatus === OrderStatus.WAIT_PAY) {
+        const payResponse = await this.payRepository.mockPaySuccess(orderId, payMethod, userId)
+        if (payResponse === undefined) {
+          this.errorMessage = '支付失败，请确认订单是否超时'
+          this.orderDetailVO = orderDetail
+          this.isLoading = false
+          return
+        }
 
-    if (orderDetail === undefined) {
-      this.errorMessage = '支付完成数据不存在'
+        orderDetail = await this.orderRepository.getOrderDetail(userId, orderId)
+      }
+
+      if (orderDetail === undefined) {
+        this.errorMessage = '支付完成数据不存在'
+        this.isLoading = false
+        return
+      }
+
+      if (orderDetail.orderStatus === OrderStatus.WAIT_PAY) {
+        this.errorMessage = '订单仍处于待支付状态，请进入订单详情重新支付'
+        this.orderDetailVO = orderDetail
+        this.paySuccessVO = undefined
+        this.isLoading = false
+        return
+      }
+
+      this.orderDetailVO = orderDetail
+      this.paySuccessVO = this.buildPaySuccessDisplayVO(orderDetail)
       this.isLoading = false
-      return
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '支付完成数据加载失败'
+      this.orderDetailVO = undefined
+      this.paySuccessVO = undefined
+      this.isLoading = false
     }
-
-    this.orderDetailVO = orderDetail
-    this.paySuccessVO = this.buildPaySuccessDisplayVO(orderDetail)
-
-    this.isLoading = false
   }
 
   async reload(): Promise<void> {

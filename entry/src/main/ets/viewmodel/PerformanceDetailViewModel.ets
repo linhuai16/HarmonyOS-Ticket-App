@@ -1,7 +1,5 @@
-import { PerformanceDetailVO } from '../model/vo/performance/PerformanceDetailVO'
-import { PerformanceSession } from '../model/entity/PerformanceSession'
+import { PerformanceDetailVO, PerformanceSessionItemVO } from '../model/vo/performance/PerformanceDetailVO'
 import { PerformanceRepository } from '../repository/PerformanceRepository'
-import { SessionRepository } from '../repository/SessionRepository'
 import { WantRepository } from '../repository/WantRepository'
 import { SessionStatus } from '../model/enums/SessionStatus'
 
@@ -14,45 +12,46 @@ export class PerformanceDetailViewModel {
 
   isLoading: boolean = false
   errorMessage: string = ''
-  selectedSession: PerformanceSession | undefined = undefined
+  selectedSession: PerformanceSessionItemVO | undefined = undefined
 
   private performanceRepository: PerformanceRepository = new PerformanceRepository()
-  private sessionRepository: SessionRepository = new SessionRepository()
   private wantRepository: WantRepository = new WantRepository()
 
-  loadDetail(projectId: string, sessionId: string, userId: string = ''): void {
+  async loadDetail(
+    projectId: string,
+    cityName: string,
+    sessionId: string | undefined = undefined,
+    userId: string = ''
+  ): Promise<void> {
     this.isLoading = true
     this.errorMessage = ''
 
     this.projectId = projectId
     this.userId = userId
 
-    const success: boolean = this.refreshDetailBySession(projectId, sessionId)
-
-    if (!success) {
+    try {
+      await this.refreshDetail(projectId, cityName, sessionId)
+    } finally {
       this.isLoading = false
-      return
     }
-
-    this.isLoading = false
   }
 
-  changeSession(sessionId: string): void {
+  async changeSession(sessionId: string, cityName: string = ''): Promise<void> {
     if (this.projectId.length === 0) {
       return
     }
 
     this.errorMessage = ''
-    this.refreshDetailBySession(this.projectId, sessionId)
+    await this.refreshDetail(this.projectId, cityName, sessionId)
   }
 
-  toggleWant(): void {
+  async toggleWant(): Promise<void> {
     if (this.detailVO === undefined || this.userId.length === 0) {
       return
     }
 
     if (this.detailVO.isWanted) {
-      const success: boolean = this.wantRepository.cancelWant(this.userId, this.projectId)
+      const success: boolean = await this.wantRepository.cancelWant(this.userId, this.projectId)
 
       if (success) {
         this.detailVO.isWanted = false
@@ -61,7 +60,7 @@ export class PerformanceDetailViewModel {
       return
     }
 
-    const success: boolean = this.wantRepository.addWant(this.userId, this.projectId)
+    const success: boolean = await this.wantRepository.addWant(this.userId, this.projectId)
 
     if (success) {
       this.detailVO.isWanted = true
@@ -69,12 +68,7 @@ export class PerformanceDetailViewModel {
   }
 
   canBuyCurrentSession(): boolean {
-    if (this.detailVO === undefined) {
-      return false
-    }
-
-    const session: PerformanceSession | undefined =
-      this.sessionRepository.getSessionDetail(this.detailVO.selectedSessionId)
+    const session: PerformanceSessionItemVO | undefined = this.selectedSession
 
     if (session === undefined) {
       return false
@@ -84,15 +78,8 @@ export class PerformanceDetailViewModel {
       session.sessionStatus === SessionStatus.PRESALE
   }
 
-  loadDetailByProject(projectId: string, userId: string = ''): void {
-    const sessions: PerformanceSession[] = this.sessionRepository.getProjectSessions(projectId)
-
-    if (sessions.length === 0) {
-      this.errorMessage = '该演出暂无可展示场次'
-      return
-    }
-
-    this.loadDetail(projectId, sessions[0].sessionId, userId)
+  async loadDetailByProject(projectId: string, cityName: string, userId: string = ''): Promise<void> {
+    await this.loadDetail(projectId, cityName, undefined, userId)
   }
 
   getSelectedSessionId(): string {
@@ -103,29 +90,39 @@ export class PerformanceDetailViewModel {
     this.errorMessage = ''
   }
 
-  private refreshDetailBySession(projectId: string, sessionId: string): boolean {
-    const session: PerformanceSession | undefined = this.sessionRepository.getSessionDetail(sessionId)
+  private async refreshDetail(projectId: string, cityName: string, sessionId: string | undefined): Promise<boolean> {
+    try {
+      const detail: PerformanceDetailVO | undefined = await this.performanceRepository.getPerformanceDetail(
+        projectId,
+        cityName,
+        sessionId,
+        this.userId
+      )
 
-    if (session === undefined || session.projectId !== projectId) {
-      this.errorMessage = '场次不存在'
+      if (detail === undefined) {
+        this.errorMessage = '演出详情不存在'
+        return false
+      }
+
+      let selectedSession: PerformanceSessionItemVO | undefined = detail.sessions.find((item: PerformanceSessionItemVO) => {
+        return item.sessionId === detail.selectedSessionId
+      })
+
+      if (selectedSession === undefined && detail.sessions.length > 0) {
+        selectedSession = detail.sessions[0]
+      }
+      if (selectedSession === undefined) {
+        this.errorMessage = '当前演出暂无可展示场次'
+        return false
+      }
+
+      this.selectedSession = selectedSession
+      this.selectedSessionId = selectedSession.sessionId
+      this.detailVO = detail
+      return true
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '演出详情加载失败'
       return false
     }
-
-    const detail: PerformanceDetailVO | undefined = this.performanceRepository.getPerformanceDetail(
-      projectId,
-      sessionId,
-      this.userId
-    )
-
-    if (detail === undefined) {
-      this.errorMessage = '演出详情不存在'
-      return false
-    }
-
-    detail.isWanted = this.wantRepository.isWanted(this.userId, projectId)
-    this.selectedSession = session
-    this.selectedSessionId = detail.selectedSessionId
-    this.detailVO = detail
-    return true
   }
 }

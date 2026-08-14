@@ -30,6 +30,12 @@ export class UserSessionUtil {
     AppStorage.setOrCreate(KEY_LOGIN_AVATAR_URL, user.avatarUrl)
     AppStorage.setOrCreate(KEY_LOGIN_TOKEN, token)
     AppStorageVersionUtil.bumpLoginVersion()
+    AppStorageVersionUtil.bumpUserCenterChangedVersion()
+    AppStorageVersionUtil.bumpOrderChangedVersion()
+    AppStorageVersionUtil.bumpTicketChangedVersion()
+    AppStorageVersionUtil.bumpWantChangedVersion()
+    AppStorageVersionUtil.bumpAddressListVersion()
+    AppStorageVersionUtil.bumpAudienceChangedVersion()
   }
 
   static clearLoginState(): void {
@@ -43,6 +49,12 @@ export class UserSessionUtil {
     AppStorage.setOrCreate(KEY_LOGIN_AVATAR_URL, '')
     AppStorage.setOrCreate(KEY_LOGIN_TOKEN, '')
     AppStorageVersionUtil.bumpLoginVersion()
+    AppStorageVersionUtil.bumpUserCenterChangedVersion()
+    AppStorageVersionUtil.bumpOrderChangedVersion()
+    AppStorageVersionUtil.bumpTicketChangedVersion()
+    AppStorageVersionUtil.bumpWantChangedVersion()
+    AppStorageVersionUtil.bumpAddressListVersion()
+    AppStorageVersionUtil.bumpAudienceChangedVersion()
   }
 
   static isLogin(): boolean {

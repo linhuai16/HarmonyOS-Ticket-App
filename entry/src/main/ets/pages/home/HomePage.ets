@@ -23,12 +23,17 @@ export struct HomePage {
   @State recommendList: HomeRecommendItemVO[] = []
   @State hasMore: boolean = false
   @State isLoading: boolean = false
+  @State errorMessage: string = ''
   @StorageLink('current_city') @Watch('onStorageCityChanged') storageCityName: string = '北京'
+  @StorageLink('performance_changed_version') @Watch('onPerformanceDataChanged') performanceChangedVersion: number = 0
+  private lastVisibleRefreshTime: number = 0
+  private isPageVisible: boolean = false
+  private pendingExternalRefresh: boolean = false
 
   aboutToAppear(): void {
     WindowImmersiveUtil.apply(this, '#F5F5F5', '#FFFFFF')
-    this.vm.loadHome()
-    this.syncFromVm()
+    this.isPageVisible = true
+    this.loadHomePage()
   }
 
   /**
@@ -36,20 +41,37 @@ export struct HomePage {
    * 因此同时监听 AppStorage 中的 current_city，城市选择页保存城市后这里直接刷新首页数据。
    */
   onStorageCityChanged(): void {
-    this.vm.refreshHome()
-    this.syncFromVm()
+    if (!this.isPageVisible) {
+      this.pendingExternalRefresh = true
+      return
+    }
+    this.refreshHomePage()
+  }
+
+  onPerformanceDataChanged(): void {
+    if (!this.isPageVisible) {
+      this.pendingExternalRefresh = true
+      return
+    }
+    this.refreshHomePage()
   }
 
   onPageShow(): void {
     WindowImmersiveUtil.apply(this, '#F5F5F5', '#FFFFFF')
-    this.vm.refreshHome()
-    this.syncFromVm()
+    this.isPageVisible = true
+    this.pendingExternalRefresh = false
+    this.refreshHomePage()
+  }
+
+  onPageHide(): void {
+    this.isPageVisible = false
   }
 
   build() {
     Column() {
       this.RefreshMarker()
       this.TopBar()
+      this.ErrorBanner()
 
       Refresh({ refreshing: $$this.isPullRefreshing }) {
         Scroll() {
@@ -76,6 +98,13 @@ export struct HomePage {
     .width('100%')
     .height('100%')
     .backgroundColor('#F5F5F5')
+    .onVisibleAreaChange([0.0, 1.0], (isVisible: boolean, currentRatio: number) => {
+      if (!isVisible || currentRatio <= 0) return
+      const now: number = Date.now()
+      if (now - this.lastVisibleRefreshTime < 1500) return
+      this.lastVisibleRefreshTime = now
+      this.refreshHomePage()
+    })
   }
 
   @Builder
@@ -125,6 +154,24 @@ export struct HomePage {
   }
 
   @Builder
+  private ErrorBanner() {
+    if (this.errorMessage.length > 0) {
+      Row() {
+        Text('接口加载失败：' + this.errorMessage)
+          .fontSize(12)
+          .fontColor('#E33B3B')
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .width('calc(100% - 24vp)')
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .margin({ left: 12, right: 12, bottom: 8 })
+      .backgroundColor('#FFF0F0')
+      .borderRadius(8)
+    }
+  }
+
+  @Builder
   private CategoryGrid() {
     Grid() {
       ForEach(this.categories, (item: HomeCategoryVO) => {
@@ -152,7 +199,7 @@ export struct HomePage {
             })
           })
         }
-      }, (item: HomeCategoryVO) => item.categoryId)
+      }, (item: HomeCategoryVO) => item.categoryId + '_' + String(this.pageVersion))
     }
     .columnsTemplate('1fr 1fr 1fr 1fr')
     .rowsTemplate('1fr 1fr')
@@ -182,7 +229,7 @@ export struct HomePage {
                 }
               })
             })
-        }, (item: HomeBannerVO) => item.bannerId)
+        }, (item: HomeBannerVO) => item.bannerId + '_' + String(this.pageVersion))
       }
       .autoPlay(this.banners.length > 1)
       .interval(3000)
@@ -229,9 +276,11 @@ export struct HomePage {
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .margin({ top: 4 })
 
-              Text(item.startTime)
+              Text((item.cityName.length > 0 ? item.cityName + ' · ' : '') + item.startTime)
                 .fontSize(12)
                 .fontColor('#666666')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .margin({ top: 6 })
 
               if (item.minPrice !== undefined) {
@@ -259,7 +308,7 @@ export struct HomePage {
             })
           })
         }
-      }, (item: HomeRecommendItemVO) => item.projectId + item.sessionId)
+      }, (item: HomeRecommendItemVO) => item.projectId + '_' + item.sessionId + '_' + String(item.minPrice) + '_' + String(this.pageVersion))
     }
     .columnsTemplate('1fr 1fr')
     .columnsGap(10)
@@ -286,29 +335,40 @@ export struct HomePage {
     .padding(16)
   }
 
-  private handleRefreshHome(): void {
+  private async handleRefreshHome(): Promise<void> {
     this.isPullRefreshing = true
-    this.vm.refreshHome()
+    await this.vm.refreshHome()
     this.syncFromVm()
     this.isPullRefreshing = false
   }
 
-  private handleLoadMore(): void {
+  private async handleLoadMore(): Promise<void> {
     if (!this.hasMore || this.isLoading) {
       return
     }
 
-    this.vm.loadMore()
+    await this.vm.loadMore()
+    this.syncFromVm()
+  }
+
+  private async loadHomePage(): Promise<void> {
+    await this.vm.loadHome()
+    this.syncFromVm()
+  }
+
+  private async refreshHomePage(): Promise<void> {
+    await this.vm.refreshHome()
     this.syncFromVm()
   }
 
   private syncFromVm(): void {
     this.currentCityName = this.vm.currentCityName
-    this.categories = this.vm.categories
-    this.banners = this.vm.banners
-    this.recommendList = this.vm.recommendList
+    this.categories = this.vm.categories.slice()
+    this.banners = this.vm.banners.slice()
+    this.recommendList = this.vm.recommendList.slice()
     this.hasMore = this.vm.hasMore
     this.isLoading = this.vm.isLoading
+    this.errorMessage = this.vm.errorMessage
     this.pageVersion++
   }
 

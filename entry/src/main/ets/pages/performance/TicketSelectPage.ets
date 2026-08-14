@@ -37,22 +37,33 @@ export struct TicketSelectPage {
   @State canIncreaseQuantityValue: boolean = false
   @State canDecreaseQuantityValue: boolean = false
   @State errorMessage: string = ''
+  @State isRefreshing: boolean = false
+  @StorageLink('ticket_select_refresh_version') @Watch('onTicketSelectRefreshRequested') ticketSelectRefreshVersion: number = 0
+  @StorageLink('performance_changed_version') @Watch('onPerformanceChanged') performanceChangedVersion: number = 0
+
+  private initialLoadCompleted: boolean = false
+  private isRefreshingAfterReturn: boolean = false
+  private isPageVisible: boolean = false
+  private pendingExternalRefresh: boolean = false
 
   aboutToAppear(): void {
     WindowImmersiveUtil.applyLight(this)
+    this.isPageVisible = true
     const params = router.getParams() as TicketSelectRouteParams
+    this.initPage(params)
+  }
 
-    const projectId: string = params.projectId ?? ''
-    const selectedSessionId: string = params.selectedSessionId ?? params.sessionId ?? ''
-
-    if (projectId.length === 0 || selectedSessionId.length === 0) {
-      this.vm.errorMessage = '票档参数不存在'
-      this.syncFromVm()
-      return
+  onPageShow(): void {
+    WindowImmersiveUtil.applyLight(this)
+    this.isPageVisible = true
+    if (this.initialLoadCompleted) {
+      this.pendingExternalRefresh = false
+      this.refreshAfterReturn()
     }
+  }
 
-    this.vm.loadPage(projectId, selectedSessionId)
-    this.syncFromVm()
+  onPageHide(): void {
+    this.isPageVisible = false
   }
 
   build() {
@@ -66,10 +77,10 @@ export struct TicketSelectPage {
         } else {
           Scroll() {
             Column() {
-              this.ProjectTitle(this.pageVO)
-              this.SessionArea(this.pageVO)
-              this.SkuArea(this.pageVO)
-              this.QuantityArea(this.pageVO)
+              this.ProjectTitle()
+              this.SessionArea()
+              this.SkuArea()
+              this.QuantityArea()
               Blank().height(96)
             }
             .width('100%')
@@ -114,6 +125,18 @@ export struct TicketSelectPage {
         .margin({ left: 4 })
 
       Blank()
+
+      Text(this.isRefreshing ? '刷新中' : '刷新')
+        .fontSize(14)
+        .fontColor(this.isRefreshing ? '#BBBBBB' : '#E33B3B')
+        .height(44)
+        .padding({ left: 10, right: 4 })
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          if (!this.isRefreshing) {
+            this.refreshTicketSelect(true)
+          }
+        })
     }
     .width('100%')
     .height(52)
@@ -134,9 +157,9 @@ export struct TicketSelectPage {
   }
 
   @Builder
-  private ProjectTitle(pageVO: TicketSelectPageVO) {
+  private ProjectTitle() {
     Column() {
-      Text(pageVO.projectTitle)
+      Text((this.pageVO as TicketSelectPageVO).projectTitle)
         .fontSize(17)
         .fontWeight(FontWeight.Bold)
         .fontColor('#222222')
@@ -144,13 +167,13 @@ export struct TicketSelectPage {
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .width('100%')
 
-      Text(pageVO.session.stationName + ' · ' + pageVO.session.venueName)
+      Text((this.pageVO as TicketSelectPageVO).session.stationName + ' · ' + (this.pageVO as TicketSelectPageVO).session.venueName)
         .fontSize(13)
         .fontColor('#666666')
         .margin({ top: 8 })
         .width('100%')
 
-      Text(pageVO.session.startTime)
+      Text((this.pageVO as TicketSelectPageVO).session.startTime)
         .fontSize(13)
         .fontColor('#666666')
         .margin({ top: 6 })
@@ -165,7 +188,7 @@ export struct TicketSelectPage {
   }
 
   @Builder
-  private SessionArea(pageVO: TicketSelectPageVO) {
+  private SessionArea() {
     Column() {
       Text('当前场次')
         .fontSize(16)
@@ -173,21 +196,21 @@ export struct TicketSelectPage {
         .width('100%')
 
       Column() {
-        Text(pageVO.session.stationName)
+        Text((this.pageVO as TicketSelectPageVO).session.stationName)
           .fontSize(14)
           .fontWeight(FontWeight.Bold)
           .fontColor('#E33B3B')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-        Text(pageVO.session.startTime)
+        Text((this.pageVO as TicketSelectPageVO).session.startTime)
           .fontSize(12)
           .fontColor('#666666')
           .margin({ top: 6 })
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-        Text(pageVO.session.venueName)
+        Text((this.pageVO as TicketSelectPageVO).session.venueName)
           .fontSize(12)
           .fontColor('#666666')
           .margin({ top: 6 })
@@ -210,7 +233,7 @@ export struct TicketSelectPage {
   }
 
   @Builder
-  private SkuArea(pageVO: TicketSelectPageVO) {
+  private SkuArea() {
     Column() {
       Text('选择票档')
         .fontSize(17)
@@ -218,7 +241,7 @@ export struct TicketSelectPage {
         .width('100%')
 
       Grid() {
-        ForEach(pageVO.skus, (item: TicketSkuSelectVO) => {
+        ForEach((this.pageVO as TicketSelectPageVO).skus, (item: TicketSkuSelectVO) => {
           GridItem() {
             Column() {
               Text(item.skuName)
@@ -253,9 +276,9 @@ export struct TicketSelectPage {
             .padding(10)
             .alignItems(HorizontalAlign.Start)
             .justifyContent(FlexAlign.Center)
-            .backgroundColor(this.selectedSkuId === item.skuId ? '#FFECEC' : '#F7F7F7')
+            .backgroundColor(this.getSkuCardBackground(item))
             .borderRadius(10)
-            .opacity(this.canChooseSku(item) ? 1 : 0.5)
+            .opacity(1)
             .onClick(() => {
               if (this.canChooseSku(item)) {
                 this.vm.selectSku(item.skuId)
@@ -263,7 +286,7 @@ export struct TicketSelectPage {
               }
             })
           }
-        }, (item: TicketSkuSelectVO) => item.skuId)
+        }, (item: TicketSkuSelectVO) => item.skuId + '_' + item.skuStatus + '_' + String(item.stockAvailable ?? 'UNKNOWN') + '_' + String(item.price) + '_' + String(this.pageVersion))
       }
       .columnsTemplate('1fr 1fr')
       .columnsGap(8)
@@ -279,7 +302,7 @@ export struct TicketSelectPage {
   }
 
   @Builder
-  private QuantityArea(pageVO: TicketSelectPageVO) {
+  private QuantityArea() {
     Column() {
       Text('购买数量')
         .fontSize(17)
@@ -287,7 +310,7 @@ export struct TicketSelectPage {
         .width('100%')
 
       Row() {
-        Text('每单限购 ' + pageVO.limitPerOrder + ' 张')
+        Text('每单限购 ' + (this.pageVO as TicketSelectPageVO).limitPerOrder + ' 张')
           .fontSize(13)
           .fontColor('#666666')
 
@@ -426,7 +449,7 @@ export struct TicketSelectPage {
           .margin({ top: 16 })
 
           Row() {
-            Text('合计')
+            Text('票面参考')
               .fontSize(16)
               .fontWeight(FontWeight.Bold)
 
@@ -457,6 +480,63 @@ export struct TicketSelectPage {
     .backgroundColor('#66000000')
   }
 
+
+  private async initPage(params: TicketSelectRouteParams): Promise<void> {
+    const projectId: string = params.projectId ?? ''
+    const selectedSessionId: string = params.selectedSessionId ?? params.sessionId ?? ''
+
+    if (projectId.length === 0 || selectedSessionId.length === 0) {
+      this.vm.errorMessage = '票档参数不存在'
+      this.syncFromVm()
+      return
+    }
+
+    await this.vm.loadPage(projectId, selectedSessionId)
+    this.syncFromVm()
+    this.initialLoadCompleted = true
+  }
+
+  private async refreshAfterReturn(): Promise<void> {
+    await this.refreshTicketSelect(false)
+  }
+
+  private onTicketSelectRefreshRequested(): void {
+    if (!this.initialLoadCompleted) return
+    if (!this.isPageVisible) {
+      this.pendingExternalRefresh = true
+      return
+    }
+    this.refreshTicketSelect(false)
+  }
+
+  private onPerformanceChanged(): void {
+    if (!this.initialLoadCompleted) return
+    if (!this.isPageVisible) {
+      this.pendingExternalRefresh = true
+      return
+    }
+    this.refreshTicketSelect(false)
+  }
+
+  private async refreshTicketSelect(showToast: boolean): Promise<void> {
+    if (this.isRefreshingAfterReturn || this.vm.projectId.length === 0 || this.vm.selectedSessionId.length === 0) {
+      return
+    }
+    this.isRefreshingAfterReturn = true
+    this.isRefreshing = true
+    try {
+      await this.vm.loadPage(this.vm.projectId, this.vm.selectedSessionId)
+      this.syncFromVm()
+      if (showToast) {
+        promptAction.showToast({
+          message: this.errorMessage.length > 0 ? this.errorMessage : '票档已刷新'
+        })
+      }
+    } finally {
+      this.isRefreshing = false
+      this.isRefreshingAfterReturn = false
+    }
+  }
 
   private handleCountClick(isIncrease: boolean): void {
     if (!this.isCountButtonEnabled(isIncrease)) {
@@ -504,26 +584,46 @@ export struct TicketSelectPage {
       return '￥0'
     }
 
-    return '￥' + this.totalAmount
+    return '参考 ￥' + this.totalAmount
   }
 
   private getSkuStatusText(item: TicketSkuSelectVO): string {
+    // 显式库存 0 优先于旧的 skuStatus 快照。这样“不可点击”和卡片文案/置灰始终一致。
+    if (this.isExplicitlySoldOut(item)) return '已售罄'
+    if ((item.skuStatus === SkuStatus.ON_SALE || item.skuStatus === SkuStatus.PRESALE) &&
+      item.stockAvailable === undefined) {
+      return '库存待实时确认'
+    }
     if (item.skuStatus === SkuStatus.PRESALE) return '预售中'
     if (item.skuStatus === SkuStatus.ON_SALE) return '可购买'
-    if (item.skuStatus === SkuStatus.SOLD_OUT) return '已售罄'
     return '不可购买'
   }
 
   private canChooseSku(item: TicketSkuSelectVO): boolean {
+    if (this.isExplicitlySoldOut(item)) {
+      return false
+    }
     if (item.skuStatus !== SkuStatus.ON_SALE && item.skuStatus !== SkuStatus.PRESALE) {
       return false
     }
 
-    return (item.stockAvailable ?? 0) > 0
+    // undefined 是第三方未提供精确库存，不等于0/售罄。
+    return true
+  }
+
+  private isExplicitlySoldOut(item: TicketSkuSelectVO): boolean {
+    return item.skuStatus === SkuStatus.SOLD_OUT ||
+      (item.stockAvailable !== undefined && item.stockAvailable <= 0)
+  }
+
+  private getSkuCardBackground(item: TicketSkuSelectVO): string {
+    if (!this.canChooseSku(item)) return '#EFEFEF'
+    if (this.selectedSkuId === item.skuId) return '#FFECEC'
+    return '#F7F7F7'
   }
 
   private syncFromVm(): void {
-    this.pageVO = this.vm.pageVO
+    this.pageVO = this.clonePageVO(this.vm.pageVO)
     this.selectedSkuId = this.vm.selectedSkuId
     this.quantity = this.vm.quantity
     this.totalAmount = this.vm.getTotalAmount()
@@ -532,7 +632,44 @@ export struct TicketSelectPage {
     this.canIncreaseQuantityValue = this.vm.canIncreaseQuantity()
     this.canDecreaseQuantityValue = this.vm.canDecreaseQuantity()
     this.errorMessage = this.vm.errorMessage
+    if (this.pageVO !== undefined) {
+      const skuSnapshots: string[] = this.pageVO.skus.map((item: TicketSkuSelectVO): string => {
+        return item.skuId + ':' + String(item.skuStatus) + ':' + String(item.stockAvailable ?? 'UNKNOWN')
+      })
+      console.info('[TicketSelectPage] uiSnapshot sessionId=' + this.pageVO.session.sessionId +
+        ', skus=' + skuSnapshots.join(','))
+    }
     this.refreshPage()
+  }
+
+
+  private clonePageVO(source: TicketSelectPageVO | undefined): TicketSelectPageVO | undefined {
+    if (source === undefined) return undefined
+    const skus: TicketSkuSelectVO[] = source.skus.map((item: TicketSkuSelectVO): TicketSkuSelectVO => {
+      return {
+        skuId: item.skuId,
+        skuName: item.skuName,
+        skuDesc: item.skuDesc,
+        price: item.price,
+        skuStatus: item.skuStatus,
+        stockAvailable: item.stockAvailable
+      }
+    })
+    return {
+      projectId: source.projectId,
+      projectTitle: source.projectTitle,
+      session: {
+        sessionId: source.session.sessionId,
+        cityName: source.session.cityName,
+        stationName: source.session.stationName,
+        venueName: source.session.venueName,
+        venueAddress: source.session.venueAddress,
+        startTime: source.session.startTime,
+        sessionStatus: source.session.sessionStatus
+      },
+      skus: skus,
+      limitPerOrder: source.limitPerOrder
+    }
   }
 
   private refreshPage(): void {

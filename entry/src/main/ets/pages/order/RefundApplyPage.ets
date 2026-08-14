@@ -16,11 +16,12 @@ import {
 import { MediaResourceUtil } from '../../common/MediaResourceUtil'
 import { UserRepository } from '../../repository/UserRepository'
 import { WindowImmersiveUtil } from '../../common/WindowImmersiveUtil'
+import { RefundType } from '../../model/enums/RefundType'
+
 interface RefundApplyRouteParams {
   userId?: string
   orderId?: string
 }
-
 
 @Entry
 @Component
@@ -28,33 +29,140 @@ struct RefundApplyPage {
   private vm: RefundApplyViewModel = new RefundApplyViewModel()
   private userRepository: UserRepository = new UserRepository()
 
+  @State pageVO: RefundApplyPageVO | undefined = undefined
+  @State errorMessage: string = ''
+  @State reason: string = ''
+  @State isLoading: boolean = false
+  @State isSubmitting: boolean = false
   @State pageVersion: number = 0
+  @State isRefreshingPage: boolean = false
+  @State canSubmitValue: boolean = false
+  @StorageLink('order_changed_version') @Watch('onRefundDependencyChanged') orderChangedVersion: number = 0
+  @StorageLink('refund_changed_version') @Watch('onRefundDependencyChanged') refundChangedVersion: number = 0
+
+  private routeUserId: string = ''
+  private routeOrderId: string = ''
 
   aboutToAppear(): void {
     WindowImmersiveUtil.applyLight(this)
     this.loadPageData()
   }
 
-  private loadPageData(): void {
-    const params = router.getParams() as RefundApplyRouteParams
+  onPageShow(): void {
+    WindowImmersiveUtil.applyLight(this)
+  }
 
-    const userId: string = params.userId ?? this.userRepository.getCurrentUserId()
-    const orderId: string = params.orderId ?? ''
+  private onRefundDependencyChanged(): void {
+    if (this.isLoading || this.isSubmitting || this.isRefreshingPage) {
+      return
+    }
+    this.loadPageData()
+  }
+
+  private async loadPageData(): Promise<void> {
+    const params: RefundApplyRouteParams = this.getRouteParams()
+
+    const userId: string = this.resolveUserId(params.userId)
+    const orderId: string = this.resolveOrderId(params.orderId)
+
+    this.isLoading = true
+    this.errorMessage = ''
+    this.pageVO = undefined
+    this.refreshPage()
 
     if (userId.length === 0) {
-      this.vm.errorMessage = '请先登录后申请退款'
+      this.isLoading = false
+      this.errorMessage = '请先登录后申请退款'
       this.refreshPage()
       router.pushUrl({ url: 'pages/user/LoginPage' })
       return
     }
 
     if (orderId.length === 0) {
-      this.vm.errorMessage = '退款订单参数不存在'
+      this.isLoading = false
+      this.errorMessage = '退款订单参数不存在'
       this.refreshPage()
       return
     }
 
-    this.vm.loadPage(userId, orderId)
+    AppStorage.setOrCreate('refund_apply_user_id', userId)
+    AppStorage.setOrCreate('refund_apply_order_id', orderId)
+
+    try {
+      await this.vm.loadPage(userId, orderId)
+    } catch (error) {
+      this.vm.errorMessage = error instanceof Error ? error.message : '退款申请数据加载失败'
+    }
+
+    this.syncFromVm()
+  }
+
+  private getRouteParams(): RefundApplyRouteParams {
+    const rawParams: RefundApplyRouteParams | undefined = router.getParams() as RefundApplyRouteParams | undefined
+
+    if (rawParams !== undefined && rawParams !== null) {
+      if (rawParams.userId !== undefined && String(rawParams.userId).length > 0) {
+        this.routeUserId = String(rawParams.userId)
+        AppStorage.setOrCreate('refund_apply_user_id', this.routeUserId)
+      }
+      if (rawParams.orderId !== undefined && String(rawParams.orderId).length > 0) {
+        this.routeOrderId = String(rawParams.orderId)
+        AppStorage.setOrCreate('refund_apply_order_id', this.routeOrderId)
+      }
+    }
+
+    return {
+      userId: this.routeUserId,
+      orderId: this.routeOrderId
+    }
+  }
+
+  private resolveUserId(routeUserId?: string): string {
+    const normalizedRouteUserId: string = (routeUserId ?? '').trim()
+    if (normalizedRouteUserId.length > 0) {
+      return normalizedRouteUserId
+    }
+
+    const storageUserId: string | undefined = AppStorage.get<string>('refund_apply_user_id')
+    if (storageUserId !== undefined && storageUserId.trim().length > 0) {
+      return storageUserId.trim()
+    }
+
+    return this.userRepository.getCurrentUserId().trim()
+  }
+
+  private resolveOrderId(routeOrderId?: string): string {
+    const normalizedRouteOrderId: string = (routeOrderId ?? '').trim()
+    if (normalizedRouteOrderId.length > 0) {
+      return normalizedRouteOrderId
+    }
+
+    const storageOrderId: string | undefined = AppStorage.get<string>('refund_apply_order_id')
+    if (storageOrderId !== undefined && storageOrderId.trim().length > 0) {
+      return storageOrderId.trim()
+    }
+
+    return ''
+  }
+
+
+  private cloneRefundPage(source: RefundApplyPageVO | undefined): RefundApplyPageVO | undefined {
+    if (source === undefined) return undefined
+    return {
+      orderId: source.orderId, projectTitle: source.projectTitle, posterUrl: source.posterUrl, startTime: source.startTime,
+      venueName: source.venueName, venueAddress: source.venueAddress, skuName: source.skuName, quantity: source.quantity,
+      payAmount: source.payAmount, estimatedRefundAmount: source.estimatedRefundAmount, feeAmount: source.feeAmount,
+      refundType: source.refundType, refundRuleText: source.refundRuleText, canRefund: source.canRefund
+    }
+  }
+
+  private syncFromVm(): void {
+    this.pageVO = this.cloneRefundPage(this.vm.pageVO)
+    this.errorMessage = this.vm.errorMessage
+    this.reason = this.vm.reason
+    this.isLoading = this.vm.isLoading
+    this.isSubmitting = this.vm.isSubmitting
+    this.canSubmitValue = this.vm.canSubmit()
     this.refreshPage()
   }
 
@@ -62,14 +170,16 @@ struct RefundApplyPage {
     Column() {
       this.TopBar()
 
-      if (this.vm.pageVO === undefined) {
+      if (this.isLoading) {
+        this.LoadingArea()
+      } else if (this.pageVO === undefined) {
         this.EmptyArea()
       } else {
         Scroll() {
           Column() {
-            this.ProjectArea(this.vm.pageVO)
-            this.RefundRuleArea(this.vm.pageVO)
-            this.AmountArea(this.vm.pageVO)
+            this.ProjectArea()
+            this.RefundRuleArea()
+            this.AmountArea()
             this.ReasonArea()
             Blank().height(92)
           }
@@ -78,7 +188,7 @@ struct RefundApplyPage {
         }
         .layoutWeight(1)
 
-        this.BottomButton(this.vm.pageVO)
+        this.BottomButton()
       }
     }
     .width('100%')
@@ -97,9 +207,9 @@ struct RefundApplyPage {
       .width(40)
       .height(52)
       .justifyContent(FlexAlign.Center)
-        .onClick(() => {
-          router.back()
-        })
+      .onClick(() => {
+        router.back()
+      })
 
       Text('申请退款')
         .fontSize(18)
@@ -108,6 +218,15 @@ struct RefundApplyPage {
         .margin({ left: 8 })
 
       Blank()
+      Text(this.isRefreshingPage ? '刷新中' : '刷新')
+        .fontSize(14)
+        .fontColor(this.isRefreshingPage ? '#BBBBBB' : '#E33B3B')
+        .height(44)
+        .padding({ left: 10, right: 4 })
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          if (!this.isRefreshingPage) this.manualRefreshRefundPage()
+        })
     }
     .width('100%')
     .height(52)
@@ -116,9 +235,9 @@ struct RefundApplyPage {
   }
 
   @Builder
-  private EmptyArea() {
+  private LoadingArea() {
     Column() {
-      Text(this.vm.errorMessage.length > 0 ? this.vm.errorMessage : '退款申请数据不存在')
+      Text('退款申请数据加载中...')
         .fontSize(15)
         .fontColor('#999999')
     }
@@ -128,33 +247,59 @@ struct RefundApplyPage {
   }
 
   @Builder
-  private ProjectArea(pageVO: RefundApplyPageVO) {
+  private EmptyArea() {
+    Column() {
+      Text(this.errorMessage.length > 0 ? this.errorMessage : '退款申请数据不存在')
+        .fontSize(15)
+        .fontColor('#999999')
+        .textAlign(TextAlign.Center)
+        .padding({ left: 20, right: 20 })
+
+      Button('重新加载')
+        .height(38)
+        .width(120)
+        .fontSize(14)
+        .fontColor('#FFFFFF')
+        .backgroundColor('#E33B3B')
+        .borderRadius(19)
+        .margin({ top: 18 })
+        .onClick(() => {
+          this.loadPageData()
+        })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  private ProjectArea() {
     Row() {
-      Image(MediaResourceUtil.getMedia(pageVO.posterUrl))
+      Image(MediaResourceUtil.getMedia((this.pageVO as RefundApplyPageVO).posterUrl))
         .width(86)
         .height(114)
         .objectFit(ImageFit.Cover)
         .borderRadius(8)
 
       Column() {
-        Text(pageVO.projectTitle)
+        Text((this.pageVO as RefundApplyPageVO).projectTitle)
           .fontSize(16)
           .fontWeight(FontWeight.Bold)
           .fontColor('#222222')
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-        Text(pageVO.startTime)
+        Text((this.pageVO as RefundApplyPageVO).startTime)
           .fontSize(13)
           .fontColor('#666666')
           .margin({ top: 8 })
 
-        Text(pageVO.venueName)
+        Text((this.pageVO as RefundApplyPageVO).venueName)
           .fontSize(13)
           .fontColor('#666666')
           .margin({ top: 4 })
 
-        Text(pageVO.skuName + ' x ' + pageVO.quantity)
+        Text((this.pageVO as RefundApplyPageVO).skuName + ' x ' + (this.pageVO as RefundApplyPageVO).quantity)
           .fontSize(13)
           .fontColor('#333333')
           .margin({ top: 8 })
@@ -170,7 +315,7 @@ struct RefundApplyPage {
   }
 
   @Builder
-  private RefundRuleArea(pageVO: RefundApplyPageVO) {
+  private RefundRuleArea() {
     Column() {
       Text('退款规则')
         .fontSize(17)
@@ -178,7 +323,16 @@ struct RefundApplyPage {
         .fontColor('#222222')
         .width('100%')
 
-      Text(pageVO.refundRuleText)
+      if ((this.pageVO as RefundApplyPageVO).refundType === RefundType.FULL_ORDER) {
+        Text('退款方式：整单退款')
+          .fontSize(14)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#333333')
+          .margin({ top: 10 })
+          .width('100%')
+      }
+
+      Text((this.pageVO as RefundApplyPageVO).refundRuleText.length > 0 ? (this.pageVO as RefundApplyPageVO).refundRuleText : '暂无退款规则说明')
         .fontSize(14)
         .fontColor('#666666')
         .lineHeight(22)
@@ -193,7 +347,7 @@ struct RefundApplyPage {
   }
 
   @Builder
-  private AmountArea(pageVO: RefundApplyPageVO) {
+  private AmountArea() {
     Column() {
       Text('退款金额')
         .fontSize(17)
@@ -201,9 +355,9 @@ struct RefundApplyPage {
         .fontColor('#222222')
         .width('100%')
 
-      this.InfoRow('实付金额', '￥' + pageVO.payAmount)
-      this.InfoRow('手续费', '￥' + pageVO.feeAmount)
-      this.InfoRow('预估退款金额', '￥' + pageVO.estimatedRefundAmount)
+      this.InfoRow('实付金额', '￥' + (this.pageVO as RefundApplyPageVO).payAmount)
+      this.InfoRow('手续费', '￥' + (this.pageVO as RefundApplyPageVO).feeAmount)
+      this.InfoRow('预估退款金额', '￥' + (this.pageVO as RefundApplyPageVO).estimatedRefundAmount)
 
       Text('最终退款金额以退款审核结果为准')
         .fontSize(12)
@@ -247,15 +401,15 @@ struct RefundApplyPage {
 
       TextArea({
         placeholder: '请输入退款原因（选填）',
-        text: this.vm.reason
+        text: this.reason
       })
         .height(96)
         .margin({ top: 10 })
         .backgroundColor('#F7F7F7')
         .borderRadius(10)
         .onChange((value: string) => {
+          this.reason = value
           this.vm.changeReason(value)
-          this.refreshPage()
         })
     }
     .width('100%')
@@ -265,16 +419,24 @@ struct RefundApplyPage {
     .borderRadius(12)
   }
 
+  private async manualRefreshRefundPage(): Promise<void> {
+    if (this.isRefreshingPage) return
+    this.isRefreshingPage = true
+    await this.loadPageData()
+    this.isRefreshingPage = false
+    promptAction.showToast({ message: this.errorMessage.length > 0 ? this.errorMessage : '退款信息已刷新' })
+  }
+
   @Builder
-  private BottomButton(pageVO: RefundApplyPageVO) {
+  private BottomButton() {
     Row() {
-      Button('确认申请退款')
+      Button(this.isSubmitting ? '提交中...' : '确认申请退款')
         .height(44)
         .width('100%')
         .fontSize(16)
         .fontColor('#FFFFFF')
-        .backgroundColor(this.vm.canSubmit() ? '#E33B3B' : '#CCCCCC')
-        .enabled(this.vm.canSubmit())
+        .backgroundColor(this.canSubmitValue && !this.isSubmitting ? '#E33B3B' : '#CCCCCC')
+        .enabled(this.canSubmitValue && !this.isSubmitting)
         .onClick(() => {
           this.submitRefund()
         })
@@ -285,14 +447,18 @@ struct RefundApplyPage {
     .backgroundColor('#FFFFFF')
   }
 
-  private submitRefund(): void {
-    const response: RefundOrderResponse | undefined = this.vm.submitRefund()
+  private async submitRefund(): Promise<void> {
+    this.vm.changeReason(this.reason)
+    this.isSubmitting = true
+    this.refreshPage()
+
+    const response: RefundOrderResponse | undefined = await this.vm.submitRefund()
+    this.syncFromVm()
 
     if (response === undefined) {
       promptAction.showToast({
-        message: this.vm.errorMessage.length > 0 ? this.vm.errorMessage : '退款申请失败'
+        message: this.errorMessage.length > 0 ? this.errorMessage : '退款申请失败'
       })
-      this.refreshPage()
       return
     }
 
@@ -300,8 +466,6 @@ struct RefundApplyPage {
       message: '退款申请已提交'
     })
 
-    // 退款成功后回到来源页，由来源页 onPageShow / StorageLink 重新拉取订单详情。
-    // 这里不能 replaceUrl 到新的订单详情页，否则旧订单详情页还留在路由栈里，返回时会看到旧状态。
     router.back()
   }
 

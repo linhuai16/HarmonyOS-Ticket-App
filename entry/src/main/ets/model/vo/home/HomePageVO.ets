@@ -50,6 +50,9 @@ export interface HomeRecommendItemVO {
   /** 演出标题 */
   title: string
 
+  /** 推荐场次所在城市；首页推荐已不按当前城市过滤 */
+  cityName: string
+
   /** 演出时间 */
   startTime: string
 

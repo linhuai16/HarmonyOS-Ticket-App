@@ -7,6 +7,9 @@ export interface TicketFolderPageVO {
 export interface TicketFolderItemVO {
   orderId: string
 
+  /** WAIT_USE / REFUNDING / FINISHED / REFUND_SUCCESS */
+  orderStatus?: string
+
   /** 默认打开的电子票ID */
   ticketId?: string
 
@@ -14,6 +17,12 @@ export interface TicketFolderItemVO {
   projectTitle: string
   startTime: string
   venueName: string
+  venueAddress: string
+
+  /** ETICKET / PAPER_TICKET */
+  deliveryType: string
+  /** PAPERLESS / EXPRESS / SELF_PICKUP */
+  deliveryMode?: string
 
   /** 订单中的票张数 */
   ticketCount: number

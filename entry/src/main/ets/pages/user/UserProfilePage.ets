@@ -1,5 +1,6 @@
 import router from '@ohos.router'
 import promptAction from '@ohos.promptAction'
+import { photoAccessHelper } from '@kit.MediaLibraryKit'
 
 import { UserViewModel } from '../../viewmodel/UserViewModel'
 import { UserRepository } from '../../repository/UserRepository'
@@ -20,6 +21,7 @@ struct UserProfilePage {
 
   @StorageLink('login_version') @Watch('onLoginStateChanged') loginVersion: number = 0
   @State pageVersion: number = 0
+  @State inputRefreshVersion: number = 0
   @State userId: string = ''
   @State nickname: string = ''
   @State phone: string = ''
@@ -91,31 +93,47 @@ struct UserProfilePage {
   @Builder
   private ProfileCard() {
     Column() {
-      Text(this.getAvatarText(this.avatarUrl))
-        .fontSize(30)
-        .fontWeight(FontWeight.Bold)
-        .fontColor('#FFFFFF')
-        .width(76)
-        .height(76)
-        .textAlign(TextAlign.Center)
-        .backgroundColor(this.getAvatarColor(this.avatarUrl))
-        .borderRadius(38)
-        .margin({ top: 18 })
+      if (this.hasCustomAvatar(this.avatarUrl)) {
+        Image(this.avatarUrl)
+          .width(76)
+          .height(76)
+          .objectFit(ImageFit.Cover)
+          .borderRadius(38)
+          .margin({ top: 18 })
+          .onClick(() => {
+            this.selectAvatarFromAlbum()
+          })
+      } else {
+        Text(this.getAvatarText(this.avatarUrl))
+          .fontSize(30)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#FFFFFF')
+          .width(76)
+          .height(76)
+          .textAlign(TextAlign.Center)
+          .backgroundColor(this.getAvatarColor(this.avatarUrl))
+          .borderRadius(38)
+          .margin({ top: 18 })
+          .onClick(() => {
+            this.selectAvatarFromAlbum()
+          })
+      }
 
-      Text('点击下方头像样式可更换头像')
+      Text('点击头像或下方按钮，从系统相册选择图片')
         .fontSize(13)
         .fontColor('#999999')
         .margin({ top: 10 })
 
-      Row() {
-        this.AvatarOption('default_avatar', '麦')
-        this.AvatarOption('mock_avatar_ticket', '票')
-        this.AvatarOption('mock_avatar_star', '星')
-        this.AvatarOption('mock_avatar_me', '我')
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.SpaceAround)
-      .margin({ top: 18, bottom: 4 })
+      Button('从相册选择头像')
+        .fontSize(14)
+        .fontColor('#F04444')
+        .backgroundColor('#FFF2F2')
+        .borderRadius(18)
+        .height(36)
+        .margin({ top: 14, bottom: 4 })
+        .onClick(() => {
+          this.selectAvatarFromAlbum()
+        })
     }
     .width('100%')
     .padding({ left: 12, right: 12, bottom: 18 })
@@ -125,48 +143,14 @@ struct UserProfilePage {
   }
 
   @Builder
-  private AvatarOption(avatarValue: string, label: string) {
-    Column() {
-      Text(label)
-        .fontSize(18)
-        .fontWeight(FontWeight.Bold)
-        .fontColor('#FFFFFF')
-        .width(44)
-        .height(44)
-        .textAlign(TextAlign.Center)
-        .backgroundColor(this.getAvatarColor(avatarValue))
-        .borderRadius(22)
-        .border({
-          width: this.avatarUrl === avatarValue ? 3 : 0,
-          color: '#F04444'
-        })
-
-      Text(this.avatarUrl === avatarValue ? '已选' : '选择')
-        .fontSize(12)
-        .fontColor(this.avatarUrl === avatarValue ? '#F04444' : '#999999')
-        .margin({ top: 6 })
-    }
-    .onClick(() => {
-      this.avatarUrl = avatarValue
-      this.refreshPage()
-    })
-  }
-
-  @Builder
   private FormCard() {
     Column() {
-      this.InputRow('用户昵称', '请输入用户昵称', this.nickname, (value: string) => {
-        this.nickname = value
-        this.refreshPage()
-      })
+      this.NicknameInputRow()
 
       Divider()
         .color('#F2F2F2')
 
-      this.InputRow('手机号', '请输入手机号', this.phone, (value: string) => {
-        this.phone = value
-        this.refreshPage()
-      })
+      this.PhoneInputRow()
     }
     .width('100%')
     .padding({ left: 14, right: 14 })
@@ -176,23 +160,52 @@ struct UserProfilePage {
   }
 
   @Builder
-  private InputRow(label: string, placeholder: string, value: string, onChange: (value: string) => void) {
+  private NicknameInputRow() {
     Row() {
-      Text(label)
+      Text('用户昵称')
         .fontSize(15)
         .fontColor('#222222')
         .width(86)
 
-      TextInput({ placeholder: placeholder, text: value })
-        .height(48)
+      ForEach(['nickname_' + this.inputRefreshVersion.toString()], (inputKey: string) => {
+        TextInput({ placeholder: '请输入用户昵称', text: this.nickname })
+          .height(48)
+          .fontSize(15)
+          .fontColor('#222222')
+          .placeholderColor('#BBBBBB')
+          .backgroundColor('#FFFFFF')
+          .layoutWeight(1)
+          .onChange((inputValue: string) => {
+            this.nickname = inputValue
+            this.refreshPage()
+          })
+      }, (inputKey: string) => inputKey)
+    }
+    .width('100%')
+    .height(58)
+  }
+
+  @Builder
+  private PhoneInputRow() {
+    Row() {
+      Text('手机号')
         .fontSize(15)
         .fontColor('#222222')
-        .placeholderColor('#BBBBBB')
-        .backgroundColor('#FFFFFF')
-        .layoutWeight(1)
-        .onChange((inputValue: string) => {
-          onChange(inputValue)
-        })
+        .width(86)
+
+      ForEach(['phone_' + this.inputRefreshVersion.toString()], (inputKey: string) => {
+        TextInput({ placeholder: '请输入手机号', text: this.phone })
+          .height(48)
+          .fontSize(15)
+          .fontColor('#222222')
+          .placeholderColor('#BBBBBB')
+          .backgroundColor('#FFFFFF')
+          .layoutWeight(1)
+          .onChange((inputValue: string) => {
+            this.phone = inputValue
+            this.refreshPage()
+          })
+      }, (inputKey: string) => inputKey)
     }
     .width('100%')
     .height(58)
@@ -229,7 +242,7 @@ struct UserProfilePage {
       })
   }
 
-  private loadPageData(allowLoginRedirect: boolean): void {
+  private async loadPageData(allowLoginRedirect: boolean): Promise<void> {
     const params: UserProfileRouteParams = this.getRouteParams()
     const routeUserId: string = params.userId ?? ''
     const effectiveUserId: string = this.getEffectiveUserId(routeUserId)
@@ -242,7 +255,7 @@ struct UserProfilePage {
       return
     }
 
-    this.vm.loadMinePage(effectiveUserId)
+    await this.vm.loadMinePage(effectiveUserId)
     if (this.vm.user === undefined) {
       this.errorMessage = this.vm.errorMessage
       promptAction.showToast({ message: this.errorMessage.length > 0 ? this.errorMessage : '用户信息不存在' })
@@ -255,6 +268,7 @@ struct UserProfilePage {
     this.avatarUrl = this.normalizeAvatarUrl(this.vm.user.avatarUrl ?? '')
     this.errorMessage = ''
     this.isWaitingLoginBack = false
+    this.refreshInputText()
     this.refreshPage()
   }
 
@@ -287,8 +301,8 @@ struct UserProfilePage {
     return this.userRepository.getCurrentUserId().trim()
   }
 
-  private saveProfile(): void {
-    const success: boolean = this.vm.updateUserProfile(this.userId, this.nickname, this.phone, this.avatarUrl)
+  private async saveProfile(): Promise<void> {
+    const success: boolean = await this.vm.updateUserProfile(this.userId, this.nickname, this.phone, this.avatarUrl)
     if (!success) {
       promptAction.showToast({ message: this.vm.errorMessage })
       this.refreshPage()
@@ -303,7 +317,12 @@ struct UserProfilePage {
     }
 
     promptAction.showToast({ message: '保存成功' })
+    this.refreshInputText()
     this.refreshPage()
+  }
+
+  private refreshInputText(): void {
+    this.inputRefreshVersion++
   }
 
   private showLogoutDialog(): void {
@@ -349,7 +368,28 @@ struct UserProfilePage {
       return 'mock_avatar_ticket'
     }
 
-    return 'default_avatar'
+    return normalizedAvatarUrl.length > 0 ? normalizedAvatarUrl : 'default_avatar'
+  }
+
+  private hasCustomAvatar(avatarUrl: string): boolean {
+    return avatarUrl !== 'default_avatar' && avatarUrl !== 'mock_avatar_ticket' &&
+      avatarUrl !== 'mock_avatar_star' && avatarUrl !== 'mock_avatar_me'
+  }
+
+  private async selectAvatarFromAlbum(): Promise<void> {
+    try {
+      const pickerOptions: photoAccessHelper.PhotoSelectOptions = new photoAccessHelper.PhotoSelectOptions()
+      pickerOptions.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE
+      pickerOptions.maxSelectNumber = 1
+      const picker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker()
+      const result: photoAccessHelper.PhotoSelectResult = await picker.select(pickerOptions)
+      if (result.photoUris.length > 0) {
+        this.avatarUrl = result.photoUris[0]
+        this.refreshPage()
+      }
+    } catch (error) {
+      promptAction.showToast({ message: '未选择头像图片' })
+    }
   }
 
   private getAvatarText(avatarUrl: string): string {

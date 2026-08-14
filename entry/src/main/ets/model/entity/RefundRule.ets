@@ -17,7 +17,4 @@ export interface RefundRule {
 
   /** 退款类型：条件退 / 不可退 */
   refundType: RefundType
-
-  /** 规则说明，前端展示 */
-  ruleText: string
 }

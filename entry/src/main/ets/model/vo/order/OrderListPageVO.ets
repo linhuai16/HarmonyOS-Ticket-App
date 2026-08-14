@@ -15,6 +15,8 @@ export interface OrderListItemVO {
   projectTitle: string
   startTime: string
   venueName: string
+  deliveryType: string
+  deliveryMode?: string
 
   skuName: string
   unitPrice: number

@@ -14,6 +14,7 @@ import { ProjectStatus } from '../../model/enums/ProjectStatus'
 import { SessionStatus } from '../../model/enums/SessionStatus'
 import { MediaResourceUtil } from '../../common/MediaResourceUtil'
 import { WindowImmersiveUtil } from '../../common/WindowImmersiveUtil'
+import { UserRepository } from '../../repository/UserRepository'
 
 interface WantRouteParams {
   userId?: string
@@ -23,12 +24,17 @@ interface WantRouteParams {
 @Component
 struct WantPage {
   private vm: WantViewModel = new WantViewModel()
+  private userRepository: UserRepository = new UserRepository()
 
   @State userId: string = ''
   @State items: WantPerformanceItemVO[] = []
   @State isLoading: boolean = false
   @State errorMessage: string = ''
   @State pageVersion: number = 0
+  @State isRefreshingPage: boolean = false
+  @StorageLink('want_changed_version') @Watch('onWantDataChanged') wantChangedVersion: number = 0
+  @StorageLink('performance_changed_version') @Watch('onWantDataChanged') performanceChangedVersion: number = 0
+  @StorageLink('login_version') @Watch('onLoginChanged') loginVersion: number = 0
 
   aboutToAppear(): void {
     WindowImmersiveUtil.applyLight(this)
@@ -40,20 +46,42 @@ struct WantPage {
     this.reloadCurrentWantList()
   }
 
-  private loadPageData(): void {
-    const params: WantRouteParams | undefined = router.getParams() as WantRouteParams | undefined
-    const userId: string = params?.userId ?? 'user_001'
+  private onWantDataChanged(): void {
+    this.reloadCurrentWantList()
+  }
 
-    this.vm.loadPage(userId)
+  private onLoginChanged(): void {
+    this.reloadForLoginChange()
+  }
+
+  private async reloadForLoginChange(): Promise<void> {
+    const currentUserId: string = this.userRepository.getCurrentUserId().trim()
+    if (currentUserId.length === 0 || !this.userRepository.isLogin()) {
+      this.userId = ''
+      this.items = []
+      this.errorMessage = ''
+      this.pageVersion++
+      return
+    }
+    await this.vm.loadPage(currentUserId)
     this.syncFromVm()
   }
 
-  private reloadCurrentWantList(): void {
+  private async loadPageData(): Promise<void> {
+    const params: WantRouteParams | undefined = router.getParams() as WantRouteParams | undefined
+    const currentUserId: string = this.userRepository.getCurrentUserId().trim()
+    const userId: string = currentUserId.length > 0 ? currentUserId : (params?.userId ?? '')
+
+    await this.vm.loadPage(userId)
+    this.syncFromVm()
+  }
+
+  private async reloadCurrentWantList(): Promise<void> {
     if (this.userId.length === 0) {
       return
     }
 
-    this.vm.loadPage(this.userId)
+    await this.vm.loadPage(this.userId)
     this.syncFromVm()
   }
 
@@ -70,7 +98,9 @@ struct WantPage {
       this.RefreshMarker()
       this.TopBar()
 
-      if (this.items.length === 0) {
+      if (this.isLoading && this.items.length === 0) {
+        this.LoadingArea('正在加载想看列表...')
+      } else if (this.items.length === 0) {
         this.EmptyArea()
       } else {
         List() {
@@ -78,7 +108,7 @@ struct WantPage {
             ListItem() {
               this.WantCard(item)
             }
-          }, (item: WantPerformanceItemVO) => item.wantId)
+          }, (item: WantPerformanceItemVO) => item.wantId + '_' + item.projectId + '_' + item.sessionStatus + '_' + String(item.minPrice) + '_' + String(this.pageVersion))
         }
         .width('100%')
         .layoutWeight(1)
@@ -121,6 +151,15 @@ struct WantPage {
         .margin({ left: 8 })
 
       Blank()
+      Text(this.isRefreshingPage ? '刷新中' : '刷新')
+        .fontSize(14)
+        .fontColor(this.isRefreshingPage ? '#BBBBBB' : '#E33B3B')
+        .height(44)
+        .padding({ left: 10, right: 4 })
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          if (!this.isRefreshingPage) this.manualRefreshWant()
+        })
     }
     .width('100%')
     .height(52)
@@ -131,9 +170,42 @@ struct WantPage {
   @Builder
   private EmptyArea() {
     Column() {
-      Text('暂无想看的演出')
+      Text(this.errorMessage.length > 0 ? this.errorMessage : '暂无想看的演出')
         .fontSize(15)
+        .fontColor(this.errorMessage.length > 0 ? '#E33B3B' : '#999999')
+        .textAlign(TextAlign.Center)
+        .padding({ left: 24, right: 24 })
+
+      if (this.errorMessage.length > 0) {
+        Text('点击重试')
+          .fontSize(14)
+          .fontColor('#FFFFFF')
+          .padding({ left: 18, right: 18, top: 8, bottom: 8 })
+          .margin({ top: 14 })
+          .backgroundColor('#E33B3B')
+          .borderRadius(18)
+          .onClick(() => {
+            this.reloadCurrentWantList()
+          })
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  private LoadingArea(message: string) {
+    Column() {
+      LoadingProgress()
+        .width(32)
+        .height(32)
+        .color('#E33B3B')
+
+      Text(message)
+        .fontSize(14)
         .fontColor('#999999')
+        .margin({ top: 12 })
     }
     .width('100%')
     .height('100%')
@@ -238,6 +310,14 @@ struct WantPage {
     .borderRadius(12)
   }
 
+  private async manualRefreshWant(): Promise<void> {
+    if (this.isRefreshingPage) return
+    this.isRefreshingPage = true
+    await this.reloadCurrentWantList()
+    this.isRefreshingPage = false
+    promptAction.showToast({ message: this.errorMessage.length > 0 ? this.errorMessage : '想看列表已刷新' })
+  }
+
   private jumpDetail(item: WantPerformanceItemVO): void {
     const params: WantDetailJumpParams = this.vm.buildDetailJumpParams(item)
 
@@ -250,8 +330,8 @@ struct WantPage {
     })
   }
 
-  private cancelWant(projectId: string): void {
-    const success: boolean = this.vm.cancelWant(projectId)
+  private async cancelWant(projectId: string): Promise<void> {
+    const success: boolean = await this.vm.cancelWant(projectId)
     this.syncFromVm()
 
     promptAction.showToast({

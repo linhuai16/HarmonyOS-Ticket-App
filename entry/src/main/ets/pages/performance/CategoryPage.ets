@@ -33,40 +33,44 @@ export struct CategoryPage {
   @State hasMore: boolean = false
   @State isLoading: boolean = false
   @State isRefreshing: boolean = false
+  @State errorMessage: string = ''
 
   @StorageLink('current_city')
   @Watch('onStorageCityChanged')
   storageCityName: string = '北京'
 
+  @StorageLink('performance_changed_version')
+  @Watch('onPerformanceDataChanged')
+  performanceChangedVersion: number = 0
+
   private categoryTabs: CategoryTabItem[] = [
     { categoryId: undefined, categoryName: '全部' },
-    { categoryId: 'cat_concert', categoryName: '演唱会' },
-    { categoryId: 'cat_drama', categoryName: '话剧' },
-    { categoryId: 'cat_music_festival', categoryName: '音乐节' },
-    { categoryId: 'cat_talkshow', categoryName: '脱口秀' },
-    { categoryId: 'cat_immersive', categoryName: '沉浸剧场' },
-    { categoryId: 'cat_crosstalk', categoryName: '相声' },
-    { categoryId: 'cat_opera', categoryName: '戏曲艺术' },
-    { categoryId: 'cat_dance', categoryName: '舞蹈舞剧' }
+    { categoryId: '1', categoryName: '演唱会' },
+    { categoryId: '2', categoryName: '话剧' },
+    { categoryId: '3', categoryName: '音乐节' },
+    { categoryId: '4', categoryName: '脱口秀' },
+    { categoryId: '5', categoryName: '沉浸剧场' },
+    { categoryId: '6', categoryName: '相声' },
+    { categoryId: '7', categoryName: '戏曲艺术' },
+    { categoryId: '8', categoryName: '舞蹈舞剧' }
   ]
 
   aboutToAppear(): void {
     WindowImmersiveUtil.apply(this, '#F5F5F5', '#F5F5F5')
     const params = router.getParams() as CategoryRouteParams
-    this.vm.initCategoryPage(params.categoryId)
-    this.syncFromVm()
+    this.initPage(params.categoryId)
   }
 
   onPageShow(): void {
     WindowImmersiveUtil.apply(this, '#F5F5F5', '#F5F5F5')
-    this.vm.reloadIfCityChanged()
-    this.syncFromVm()
+    this.reloadIfNeeded()
   }
 
   build() {
     Column() {
       this.RefreshMarker()
       this.TopBar()
+      this.ErrorBanner()
       this.CategoryTabs()
       this.SortBar()
 
@@ -129,6 +133,24 @@ export struct CategoryPage {
   }
 
   @Builder
+  private ErrorBanner() {
+    if (this.errorMessage.length > 0) {
+      Row() {
+        Text('接口加载失败：' + this.errorMessage)
+          .fontSize(12)
+          .fontColor('#E33B3B')
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .width('calc(100% - 24vp)')
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .margin({ left: 12, right: 12, bottom: 8 })
+      .backgroundColor('#FFF0F0')
+      .borderRadius(8)
+    }
+  }
+
+  @Builder
   private CategoryTabs() {
     Scroll() {
       Row() {
@@ -146,8 +168,7 @@ export struct CategoryPage {
           .margin({ right: 8 })
           .justifyContent(FlexAlign.Center)
           .onClick(() => {
-            this.vm.changeCategory(item.categoryId)
-            this.syncFromVm()
+            this.handleChangeCategory(item.categoryId)
           })
         }, (item: CategoryTabItem) => item.categoryId === undefined ? 'all' : item.categoryId)
       }
@@ -172,8 +193,7 @@ export struct CategoryPage {
       .padding({ left: 4, right: 14 })
       .justifyContent(FlexAlign.Center)
       .onClick(() => {
-        this.vm.changeSort(PerformanceSortType.HOT)
-        this.syncFromVm()
+        this.handleChangeSort(PerformanceSortType.HOT)
       })
 
       Row() {
@@ -186,8 +206,7 @@ export struct CategoryPage {
       .padding({ left: 4, right: 14 })
       .justifyContent(FlexAlign.Center)
       .onClick(() => {
-        this.vm.changeSort(PerformanceSortType.NEW)
-        this.syncFromVm()
+        this.handleChangeSort(PerformanceSortType.NEW)
       })
 
       Blank()
@@ -234,7 +253,7 @@ export struct CategoryPage {
           ListItem() {
             this.PerformanceCard(item)
           }
-        }, (item: CategoryPerformanceItemVO) => item.projectId + '_' + item.sessionId)
+        }, (item: CategoryPerformanceItemVO) => item.projectId + '_' + item.sessionId + '_' + item.sessionStatus + '_' + String(item.minPrice) + '_' + String(this.pageVersion))
 
         ListItem() {
           this.LoadMoreArea()
@@ -352,19 +371,19 @@ export struct CategoryPage {
     .width('100%')
   }
 
-  private handleRefresh(): void {
+  private async handleRefresh(): Promise<void> {
     this.isRefreshing = true
-    this.vm.refresh()
+    await this.vm.refresh()
     this.syncFromVm()
     this.isRefreshing = false
   }
 
-  private handleLoadMore(): void {
+  private async handleLoadMore(): Promise<void> {
     if (!this.hasMore || this.isLoading) {
       return
     }
 
-    this.vm.loadMore()
+    await this.vm.loadMore()
     this.syncFromVm()
   }
 
@@ -375,7 +394,39 @@ export struct CategoryPage {
       return
     }
 
-    this.vm.changeCity(cityName)
+    this.handleChangeCity(cityName)
+  }
+
+  private onPerformanceDataChanged(): void {
+    this.handleRefresh()
+  }
+
+  private async handleChangeCity(cityName: string): Promise<void> {
+    await this.vm.changeCity(cityName)
+    this.syncFromVm()
+  }
+
+  private async initPage(categoryId: string | undefined): Promise<void> {
+    await this.vm.initCategoryPage(categoryId)
+    this.syncFromVm()
+  }
+
+  private async reloadIfNeeded(): Promise<void> {
+    const beforeCity: string = this.vm.currentCityName
+    await this.vm.reloadIfCityChanged()
+    if (beforeCity === this.vm.currentCityName) {
+      await this.vm.refresh()
+    }
+    this.syncFromVm()
+  }
+
+  private async handleChangeCategory(categoryId: string | undefined): Promise<void> {
+    await this.vm.changeCategory(categoryId)
+    this.syncFromVm()
+  }
+
+  private async handleChangeSort(sortType: PerformanceSortType): Promise<void> {
+    await this.vm.changeSort(sortType)
     this.syncFromVm()
   }
 
@@ -387,6 +438,7 @@ export struct CategoryPage {
     this.performanceList = this.vm.categoryList.slice()
     this.hasMore = this.vm.hasMore
     this.isLoading = this.vm.isLoading
+    this.errorMessage = this.vm.errorMessage
     this.pageVersion++
   }
 
@@ -394,17 +446,17 @@ export struct CategoryPage {
     return this.selectedCategoryId === (categoryId ?? '')
   }
 
-  private toggleFilterTime(): void {
+  private async toggleFilterTime(): Promise<void> {
     if (this.selectedFilterTime.length === 0) {
-      this.vm.changeFilterTime('NEXT_30_DAYS')
+      await this.vm.changeFilterTime('THIS_MONTH')
     } else {
-      this.vm.clearFilterTime()
+      await this.vm.clearFilterTime()
     }
     this.syncFromVm()
   }
 
   private getFilterTimeText(): string {
-    if (this.selectedFilterTime === 'NEXT_30_DAYS') {
+    if (this.selectedFilterTime === 'THIS_MONTH') {
       return '近一月  ×'
     }
     return '时间筛选'

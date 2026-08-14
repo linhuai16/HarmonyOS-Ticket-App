@@ -8,6 +8,8 @@ import {
   OrderRepository
 } from '../repository/OrderRepository'
 import { PayRepository } from '../repository/PayRepository'
+import { RefundRepository } from '../repository/RefundRepository'
+import { RefundProgressVO } from '../model/vo/ticketsource/RefundProgressVO'
 
 export interface TicketDetailJumpParams {
   userId: string
@@ -33,13 +35,18 @@ export class OrderDetailViewModel {
 
   isLoading: boolean = false
   errorMessage: string = ''
+  refundProgress: RefundProgressVO | undefined = undefined
+  refundProgressErrorMessage: string = ''
 
   private orderRepository: OrderRepository = new OrderRepository()
   private payRepository: PayRepository = new PayRepository()
+  private refundRepository: RefundRepository = new RefundRepository()
 
   async loadPage(userId: string, orderId: string): Promise<void> {
     this.isLoading = true
     this.errorMessage = ''
+    this.refundProgress = undefined
+    this.refundProgressErrorMessage = ''
 
     this.userId = userId
     this.orderId = orderId
@@ -55,6 +62,15 @@ export class OrderDetailViewModel {
     }
 
     this.orderDetailVO = detail
+
+    if (detail.orderStatus === OrderStatus.REFUNDING || detail.orderStatus === OrderStatus.REFUND_SUCCESS) {
+      try {
+        this.refundProgress = await this.refundRepository.getRefundProgress(userId, orderId)
+      } catch (error) {
+        this.refundProgress = undefined
+        this.refundProgressErrorMessage = error instanceof Error ? error.message : '退款进度暂时无法获取'
+      }
+    }
 
     this.isLoading = false
   }
@@ -81,7 +97,7 @@ export class OrderDetailViewModel {
       return false
     }
 
-    const payResponse = this.payRepository.mockPaySuccess(this.orderId, payMethod)
+    const payResponse = await this.payRepository.mockPaySuccess(this.orderId, payMethod, this.userId)
     if (payResponse === undefined) {
       this.errorMessage = '支付失败，请确认订单是否超时'
       await this.reload()

@@ -27,6 +27,9 @@ export interface OrderAudience {
   /** 证件号快照，实体层保存完整值，页面展示时由 VO 做脱敏 */
   certificateNo: string
 
+  /** 证件号哈希，用于同场次实名查重，不一定返回给页面 VO */
+  certificateNoHash: string
+
   /** 手机号快照 */
   phone: string
 }

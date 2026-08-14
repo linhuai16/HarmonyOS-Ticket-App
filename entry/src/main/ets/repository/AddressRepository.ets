@@ -3,40 +3,69 @@ import {
   AddressItemVO
 } from '../model/vo/user/AddressPageVO'
 import { UserAddress } from '../model/entity/UserAddress'
-import { userAddressMockList } from '../mock/user/UserAddressMock'
-import { MaskUtil } from '../utils/MaskUtil'
-import { IdGenerator } from '../utils/IdGenerator'
+import { ApiClient } from '../network/ApiClient'
 import { AppStorageVersionUtil } from '../utils/AppStorageVersionUtil'
-import { UserDataUtil } from '../utils/UserDataUtil'
 
 export interface CreateAddressRequest {
-  receiverName: string
-  receiverPhone: string
-  province: string
-  city: string
-  district: string
-  detailAddress: string
-  isDefault: boolean
+  countryCode?: string | null
+  provinceCode?: string | null
+  cityCode?: string | null
+  areaCode?: string | null
+  receiverName?: string | null
+  receiverPhone?: string | null
+  province?: string | null
+  city?: string | null
+  district?: string | null
+  detailAddress?: string | null
+  isDefault?: boolean | null
 }
 
 export interface UpdateAddressRequest {
-  receiverName: string
-  receiverPhone: string
-  province: string
-  city: string
-  district: string
-  detailAddress: string
-  isDefault: boolean
+  countryCode?: string | null
+  provinceCode?: string | null
+  cityCode?: string | null
+  areaCode?: string | null
+  receiverName?: string | null
+  receiverPhone?: string | null
+  province?: string | null
+  city?: string | null
+  district?: string | null
+  detailAddress?: string | null
+  isDefault?: boolean | null
 }
 
-/**
- 获取地址列表
- 获取地址详情
- 新增地址
- 修改地址
- 删除地址
- 设为默认地址
- */
+interface BackendAddressItemVO {
+  addressId: number | string
+  receiverName?: string | null
+  maskedReceiverPhone?: string | null
+  fullAddress?: string | null
+  isDefault?: boolean | null
+}
+
+interface BackendAddressDetailVO {
+  countryCode?: string | null
+  provinceCode?: string | null
+  cityCode?: string | null
+  areaCode?: string | null
+  addressId: number | string
+  receiverName?: string | null
+  receiverPhone?: string | null
+  province?: string | null
+  city?: string | null
+  district?: string | null
+  detailAddress?: string | null
+  isDefault?: boolean | null
+}
+
+interface BackendAddressListPageVO {
+  addresses: BackendAddressItemVO[]
+}
+
+interface OperateResponse {
+  success: boolean
+}
+
+/** 收货地址 Repository：从 SpringBoot 接口读写，不再使用 Mock。 */
 export class AddressRepository {
   private lastErrorMessage: string = ''
 
@@ -44,374 +73,109 @@ export class AddressRepository {
     return this.lastErrorMessage
   }
 
-  /**
-   1. 获取地址列表
-   */
-  getAddressList(userId: string): AddressListPageVO {
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    if (normalizedUserId.length === 0) {
-      const emptyResult: AddressListPageVO = {
-        addresses: new Array<AddressItemVO>()
-      }
-      return emptyResult
-    }
-
-    this.ensureSingleDefault(normalizedUserId)
-
-    const userAddresses: UserAddress[] = this.getUserAddresses(normalizedUserId)
-    userAddresses.sort((a: UserAddress, b: UserAddress): number => {
-      return this.compareDefaultFirst(a.isDefault, b.isDefault)
-    })
-
-    const addresses: AddressItemVO[] = []
-    userAddresses.forEach((item: UserAddress) => {
-      addresses.push(this.buildAddressItemVO(item))
-    })
-
-    const result: AddressListPageVO = {
-      addresses: addresses
-    }
-
-    return result
-  }
-
-  /**
-   2. 获取地址详情
-   */
-  getAddressDetail(userId: string, addressId: string): UserAddress | undefined {
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    const normalizedAddressId: string = addressId.trim()
-
-    if (normalizedUserId.length === 0 || normalizedAddressId.length === 0) {
-      return undefined
-    }
-
-    return this.findAddress(normalizedUserId, normalizedAddressId)
-  }
-
-  /**
-   * 3. 新增地址
-   */
-  createAddress(userId: string, request: CreateAddressRequest): UserAddress | undefined {
+  async getAddressList(userId: string): Promise<AddressListPageVO> {
     this.lastErrorMessage = ''
+    if (userId.length === 0) {
+      return { addresses: [] }
+    }
 
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    if (normalizedUserId.length === 0) {
-      this.lastErrorMessage = '用户未登录，请先登录'
+    const response: BackendAddressListPageVO =
+      await ApiClient.get<BackendAddressListPageVO>('/api/users/' + encodeURIComponent(userId) + '/addresses')
+
+    return {
+      addresses: (response.addresses ?? []).map((item: BackendAddressItemVO): AddressItemVO => {
+        return {
+          addressId: String(item.addressId),
+          receiverName: item.receiverName ?? '',
+          maskedReceiverPhone: item.maskedReceiverPhone ?? '',
+          fullAddress: item.fullAddress ?? '',
+          isDefault: item.isDefault === true
+        }
+      })
+    }
+  }
+
+  async getAddressDetail(userId: string, addressId: string): Promise<UserAddress | undefined> {
+    this.lastErrorMessage = ''
+    if (userId.length === 0 || addressId.length === 0) {
       return undefined
     }
 
-    const receiverName: string = request.receiverName.trim()
-    const receiverPhone: string = request.receiverPhone.trim()
-    const province: string = request.province.trim()
-    const city: string = request.city.trim()
-    const district: string = request.district.trim()
-    const detailAddress: string = request.detailAddress.trim()
+    const response: BackendAddressDetailVO =
+      await ApiClient.get<BackendAddressDetailVO>('/api/users/' + encodeURIComponent(userId) + '/addresses/' + encodeURIComponent(addressId))
 
-    if (!this.validateAddressFields(receiverName, receiverPhone, province, city, district, detailAddress)) {
+    return this.mapAddressDetail(userId, response)
+  }
+
+  async createAddress(userId: string, request: CreateAddressRequest): Promise<UserAddress | undefined> {
+    this.lastErrorMessage = ''
+    if (userId.length === 0) {
       return undefined
     }
 
-    if (this.hasSameAddress(normalizedUserId, receiverName, receiverPhone, province, city, district, detailAddress)) {
-      this.lastErrorMessage = '该收货地址已存在，请勿重复添加'
-      return undefined
-    }
+    const response: BackendAddressDetailVO =
+      await ApiClient.post<BackendAddressDetailVO>('/api/users/' + encodeURIComponent(userId) + '/addresses', request)
 
-    const shouldSetDefault: boolean = request.isDefault || this.getUserAddressCount(normalizedUserId) === 0
-    if (shouldSetDefault) {
-      this.clearDefault(normalizedUserId)
-    }
-
-    const address: UserAddress = {
-      addressId: IdGenerator.createAddressId(),
-      userId: normalizedUserId,
-      receiverName: receiverName,
-      receiverPhone: receiverPhone,
-      province: province,
-      city: city,
-      district: district,
-      detailAddress: detailAddress,
-      isDefault: shouldSetDefault
-    }
-
-    userAddressMockList.push(address)
-    this.ensureSingleDefault(normalizedUserId)
+    const address: UserAddress = this.mapAddressDetail(userId, response)
     AppStorageVersionUtil.bumpAddressListVersion()
-
     return address
   }
 
-  /**
-   * 4. 修改地址
-   */
-  updateAddress(userId: string, addressId: string, request: UpdateAddressRequest): UserAddress | undefined {
+  async updateAddress(userId: string, addressId: string, request: UpdateAddressRequest): Promise<UserAddress | undefined> {
     this.lastErrorMessage = ''
-
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    const normalizedAddressId: string = addressId.trim()
-
-    if (normalizedUserId.length === 0 || normalizedAddressId.length === 0) {
-      this.lastErrorMessage = '用户未登录，请先登录'
+    if (userId.length === 0 || addressId.length === 0) {
       return undefined
     }
 
-    const address: UserAddress | undefined = this.findAddress(normalizedUserId, normalizedAddressId)
-    if (address === undefined) {
-      this.lastErrorMessage = '收货地址不存在'
-      return undefined
-    }
+    const response: BackendAddressDetailVO =
+      await ApiClient.put<BackendAddressDetailVO>('/api/users/' + encodeURIComponent(userId) + '/addresses/' + encodeURIComponent(addressId), request)
 
-    const receiverName: string = request.receiverName.trim()
-    const receiverPhone: string = request.receiverPhone.trim()
-    const province: string = request.province.trim()
-    const city: string = request.city.trim()
-    const district: string = request.district.trim()
-    const detailAddress: string = request.detailAddress.trim()
-
-    if (!this.validateAddressFields(receiverName, receiverPhone, province, city, district, detailAddress)) {
-      return undefined
-    }
-
-    if (this.hasSameAddress(
-      normalizedUserId,
-      receiverName,
-      receiverPhone,
-      province,
-      city,
-      district,
-      detailAddress,
-      normalizedAddressId
-    )) {
-      this.lastErrorMessage = '该收货地址已存在，请勿重复添加'
-      return undefined
-    }
-
-    if (request.isDefault) {
-      this.clearDefault(normalizedUserId)
-    }
-
-    address.receiverName = receiverName
-    address.receiverPhone = receiverPhone
-    address.province = province
-    address.city = city
-    address.district = district
-    address.detailAddress = detailAddress
-    address.isDefault = request.isDefault
-
-    this.ensureSingleDefault(normalizedUserId)
+    const address: UserAddress = this.mapAddressDetail(userId, response)
     AppStorageVersionUtil.bumpAddressListVersion()
-
     return address
   }
 
-  /**
-   5. 删除地址
-   */
-  deleteAddress(userId: string, addressId: string): boolean {
+  async deleteAddress(userId: string, addressId: string): Promise<boolean> {
     this.lastErrorMessage = ''
-
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    const normalizedAddressId: string = addressId.trim()
-
-    if (normalizedUserId.length === 0 || normalizedAddressId.length === 0) {
-      this.lastErrorMessage = '用户未登录，请先登录'
+    if (userId.length === 0 || addressId.length === 0) {
       return false
     }
 
-    const index: number = userAddressMockList.findIndex((item: UserAddress): boolean => {
-      return item.userId === normalizedUserId && item.addressId === normalizedAddressId
-    })
+    const response: OperateResponse =
+      await ApiClient.delete<OperateResponse>('/api/users/' + encodeURIComponent(userId) + '/addresses/' + encodeURIComponent(addressId))
 
-    if (index < 0) {
-      this.lastErrorMessage = '收货地址不存在'
-      return false
-    }
-
-    const isDefault: boolean = userAddressMockList[index].isDefault
-    userAddressMockList.splice(index, 1)
-
-    if (isDefault) {
-      this.resetFirstAsDefault(normalizedUserId)
-    }
-
-    this.ensureSingleDefault(normalizedUserId)
-    AppStorageVersionUtil.bumpAddressListVersion()
-
-    return true
+    if (response.success) AppStorageVersionUtil.bumpAddressListVersion()
+    return response.success
   }
 
-  /**
-   6. 设为默认地址
-   */
-  setDefaultAddress(userId: string, addressId: string): boolean {
+  async setDefaultAddress(userId: string, addressId: string): Promise<boolean> {
     this.lastErrorMessage = ''
-
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    const normalizedAddressId: string = addressId.trim()
-
-    if (normalizedUserId.length === 0 || normalizedAddressId.length === 0) {
-      this.lastErrorMessage = '用户未登录，请先登录'
+    if (userId.length === 0 || addressId.length === 0) {
       return false
     }
 
-    const address: UserAddress | undefined = this.findAddress(normalizedUserId, normalizedAddressId)
-    if (address === undefined) {
-      this.lastErrorMessage = '收货地址不存在'
-      return false
+    const response: OperateResponse =
+      await ApiClient.put<OperateResponse>('/api/users/' + encodeURIComponent(userId) + '/addresses/' + encodeURIComponent(addressId) + '/default')
+
+    if (response.success) AppStorageVersionUtil.bumpAddressListVersion()
+    return response.success
+  }
+
+  private mapAddressDetail(userId: string, raw: BackendAddressDetailVO): UserAddress {
+    return {
+      addressId: String(raw.addressId),
+      userId: userId,
+      receiverName: raw.receiverName ?? '',
+      receiverPhone: raw.receiverPhone ?? '',
+      countryCode: raw.countryCode ?? '',
+      provinceCode: raw.provinceCode ?? '',
+      cityCode: raw.cityCode ?? '',
+      areaCode: raw.areaCode ?? '',
+      province: raw.province ?? '',
+      city: raw.city ?? '',
+      district: raw.district ?? '',
+      detailAddress: raw.detailAddress ?? '',
+      isDefault: raw.isDefault === true
     }
-
-    this.clearDefault(normalizedUserId)
-    address.isDefault = true
-    this.ensureSingleDefault(normalizedUserId)
-    AppStorageVersionUtil.bumpAddressListVersion()
-
-    return true
-  }
-
-  private buildAddressItemVO(item: UserAddress): AddressItemVO {
-    const vo: AddressItemVO = {
-      addressId: item.addressId,
-      receiverName: item.receiverName,
-      maskedReceiverPhone: MaskUtil.maskPhone(item.receiverPhone),
-      fullAddress: UserDataUtil.buildFullAddress(item),
-      isDefault: item.isDefault
-    }
-
-    return vo
-  }
-
-  private getUserAddresses(userId: string): UserAddress[] {
-    const addresses: UserAddress[] = []
-    userAddressMockList.forEach((item: UserAddress) => {
-      if (item.userId === userId) {
-        addresses.push(item)
-      }
-    })
-    return addresses
-  }
-
-  private getUserAddressCount(userId: string): number {
-    let count: number = 0
-    userAddressMockList.forEach((item: UserAddress) => {
-      if (item.userId === userId) {
-        count++
-      }
-    })
-    return count
-  }
-
-  private findAddress(userId: string, addressId: string): UserAddress | undefined {
-    return userAddressMockList.find((item: UserAddress): boolean => {
-      return item.userId === userId && item.addressId === addressId
-    })
-  }
-
-  private validateAddressFields(
-    receiverName: string,
-    receiverPhone: string,
-    province: string,
-    city: string,
-    district: string,
-    detailAddress: string
-  ): boolean {
-    const errorMessage: string = UserDataUtil.getAddressValidateError(
-      receiverName,
-      receiverPhone,
-      province,
-      city,
-      district,
-      detailAddress
-    )
-
-    if (errorMessage.length > 0) {
-      this.lastErrorMessage = errorMessage
-      return false
-    }
-
-    this.lastErrorMessage = ''
-    return true
-  }
-
-  private hasSameAddress(
-    userId: string,
-    receiverName: string,
-    receiverPhone: string,
-    province: string,
-    city: string,
-    district: string,
-    detailAddress: string,
-    ignoreAddressId: string = ''
-  ): boolean {
-    return userAddressMockList.some((item: UserAddress): boolean => {
-      if (item.userId !== userId) {
-        return false
-      }
-
-      if (ignoreAddressId.length > 0 && item.addressId === ignoreAddressId) {
-        return false
-      }
-
-      return UserDataUtil.isSameAddress(
-        item,
-        receiverName,
-        receiverPhone,
-        province,
-        city,
-        district,
-        detailAddress
-      )
-    })
-  }
-
-  private compareDefaultFirst(leftIsDefault: boolean, rightIsDefault: boolean): number {
-    if (leftIsDefault && !rightIsDefault) {
-      return -1
-    }
-
-    if (!leftIsDefault && rightIsDefault) {
-      return 1
-    }
-
-    return 0
-  }
-
-  private clearDefault(userId: string): void {
-    userAddressMockList.forEach((item: UserAddress) => {
-      if (item.userId === userId) {
-        item.isDefault = false
-      }
-    })
-  }
-
-  private resetFirstAsDefault(userId: string): void {
-    const first: UserAddress | undefined = userAddressMockList.find((item: UserAddress): boolean => {
-      return item.userId === userId
-    })
-
-    if (first !== undefined) {
-      first.isDefault = true
-    }
-  }
-
-  private ensureSingleDefault(userId: string): void {
-    const addresses: UserAddress[] = this.getUserAddresses(userId)
-    if (addresses.length === 0) {
-      return
-    }
-
-    let activeDefaultAddressId: string = ''
-    addresses.forEach((item: UserAddress) => {
-      if (item.isDefault) {
-        activeDefaultAddressId = item.addressId
-      }
-    })
-
-    if (activeDefaultAddressId.length === 0) {
-      activeDefaultAddressId = addresses[0].addressId
-    }
-
-    addresses.forEach((item: UserAddress) => {
-      item.isDefault = item.addressId === activeDefaultAddressId
-    })
   }
 }

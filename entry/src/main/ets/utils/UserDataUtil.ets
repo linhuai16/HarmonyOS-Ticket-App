@@ -1,7 +1,5 @@
-import { User } from '../model/entity/User'
 import { UserAddress } from '../model/entity/UserAddress'
 import { CertificateType } from '../model/enums/CertificateType'
-import { userMockList } from '../mock/user/UserMock'
 import { AddressRegionUtil } from '../utils/AddressRegionUtil'
 
 export class UserDataUtil {
@@ -38,41 +36,6 @@ export class UserDataUtil {
   static buildDefaultNickname(phone: string): string {
     const normalizedPhone: string = UserDataUtil.normalizePhone(phone)
     return normalizedPhone.length >= 4 ? `用户${normalizedPhone.substring(7)}` : '用户'
-  }
-
-  static findUserById(userId: string): User | undefined {
-    const normalizedUserId: string = UserDataUtil.normalizeUserId(userId)
-    if (normalizedUserId.length === 0) {
-      return undefined
-    }
-
-    return userMockList.find((item: User): boolean => {
-      return item.userId === normalizedUserId
-    })
-  }
-
-  static findUserByPhone(phone: string): User | undefined {
-    const normalizedPhone: string = UserDataUtil.normalizePhone(phone)
-    if (normalizedPhone.length === 0) {
-      return undefined
-    }
-
-    return userMockList.find((item: User): boolean => {
-      return item.phone === normalizedPhone
-    })
-  }
-
-  static hasDuplicateUserPhone(phone: string, ignoreUserId: string = ''): boolean {
-    const normalizedPhone: string = UserDataUtil.normalizePhone(phone)
-    const normalizedIgnoreUserId: string = UserDataUtil.normalizeUserId(ignoreUserId)
-
-    return userMockList.some((item: User): boolean => {
-      if (item.phone !== normalizedPhone) {
-        return false
-      }
-
-      return normalizedIgnoreUserId.length === 0 || item.userId !== normalizedIgnoreUserId
-    })
   }
 
   static buildFullAddress(address: UserAddress): string {

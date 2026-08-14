@@ -5,34 +5,18 @@ import {
 
 import { PerformanceRepository } from '../repository/PerformanceRepository'
 import { SearchRepository } from '../repository/SearchRepository'
-import { CityRepository } from '../repository/CityRepository'
 
 const SEARCH_PAGE_SIZE: number = 10
-const MOCK_USER_ID: string = 'user_001'
-
+const DEFAULT_USER_ID: string = '1'
 
 /**
- 顶部搜索框可输入；
- 输入后搜索按钮可用；
- 点击 x 清空；
- 二次搜索保存历史；
- 二次搜索重新加载结果列表；
- 结果列表分页；
- 城市变化后重新加载结果；
- 点击卡片跳转详情页；
- 不包含分类、排序、时间筛选。
+ * 搜索结果页 ViewModel。
  */
-
 export class SearchResultViewModel {
-  userId: string = MOCK_USER_ID
+  userId: string = DEFAULT_USER_ID
 
-  /** 当前真正用于搜索的关键词 */
   keyword: string = ''
-
-  /** 顶部搜索框输入中的关键词 */
   inputKeyword: string = ''
-
-  currentCityName: string = ''
 
   resultList: SearchResultItemVO[] = []
   hasMore: boolean = false
@@ -46,18 +30,13 @@ export class SearchResultViewModel {
 
   private performanceRepository: PerformanceRepository = new PerformanceRepository()
   private searchRepository: SearchRepository = new SearchRepository()
-  private cityRepository: CityRepository = new CityRepository()
 
-  constructor() {
-    this.currentCityName = this.cityRepository.getCurrentCity()
-  }
-
-  initPage(keyword: string, userId: string = MOCK_USER_ID): void {
+  async initPage(keyword: string, userId: string = DEFAULT_USER_ID): Promise<void> {
     this.userId = userId
     this.keyword = keyword.trim()
     this.inputKeyword = this.keyword
     this.offset = 0
-    this.loadResultList()
+    await this.loadResultList()
   }
 
   changeInputKeyword(keyword: string): void {
@@ -74,10 +53,7 @@ export class SearchResultViewModel {
     return this.inputKeyword.trim().length > 0
   }
 
-  /**
-   * 搜索结果页顶部二次搜索
-   */
-  searchAgain(): void {
+  async searchAgain(): Promise<void> {
     const realKeyword: string = this.inputKeyword.trim()
 
     if (realKeyword.length === 0) {
@@ -85,56 +61,37 @@ export class SearchResultViewModel {
       return
     }
 
-    this.searchRepository.saveSearchHistory(realKeyword, this.userId)
+    await this.searchRepository.saveSearchHistory(realKeyword, this.userId)
 
     this.keyword = realKeyword
     this.inputKeyword = realKeyword
     this.offset = 0
-    this.loadResultList()
+    await this.loadResultList()
   }
 
-  refresh(): void {
+  async refresh(): Promise<void> {
     if (this.isRefreshing) {
       return
     }
 
     this.isRefreshing = true
     this.offset = 0
-    this.loadResultList()
+    await this.loadResultList()
     this.isRefreshing = false
   }
 
-  loadMore(): void {
+  async loadMore(): Promise<void> {
     if (this.isLoading || !this.hasMore) {
       return
     }
 
-    this.loadMoreResultList()
+    await this.loadMoreResultList()
   }
-
-
-  /**
-   * 页面重新显示时检查当前城市是否变化。
-   * 搜索结果页当前不展示城市入口，但如果用户从其他入口切换了城市，
-   * 回到该页后仍应按当前关键词和新城市刷新结果。
-   */
-  reloadIfCityChanged(): void {
-    const newCityName: string = this.cityRepository.getCurrentCity()
-
-    if (newCityName === this.currentCityName) {
-      return
-    }
-
-    this.currentCityName = newCityName
-    this.offset = 0
-    this.loadResultList()
-  }
-
 
   buildDetailJumpParams(item: SearchResultItemVO): Record<string, string> {
     return {
-      "projectId": item.projectId,
-      "sessionId": item.sessionId
+      'projectId': item.projectId,
+      'sessionId': item.sessionId
     }
   }
 
@@ -142,44 +99,49 @@ export class SearchResultViewModel {
     this.errorMessage = ''
   }
 
-  private loadResultList(): void {
+  private async loadResultList(): Promise<void> {
     if (this.isLoading) {
       return
     }
 
     this.isLoading = true
     this.errorMessage = ''
-    this.currentCityName = this.cityRepository.getCurrentCity()
 
-    const pageVO: SearchResultPageVO = this.performanceRepository.searchPerformances(
-      this.keyword,
-      this.currentCityName,
-      this.pageSize,
-      this.offset
-    )
+    try {
+      const pageVO: SearchResultPageVO = await this.performanceRepository.searchPerformances(
+        this.keyword,
+        this.pageSize,
+        this.offset
+      )
 
-    this.resultList = pageVO.resultList
-    this.hasMore = pageVO.hasMore
-    this.offset = this.resultList.length
-
-    this.isLoading = false
+      this.resultList = pageVO.resultList
+      this.hasMore = pageVO.hasMore
+      this.offset = this.resultList.length
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '搜索结果加载失败'
+    } finally {
+      this.isLoading = false
+    }
   }
 
-  private loadMoreResultList(): void {
+  private async loadMoreResultList(): Promise<void> {
     this.isLoading = true
     this.errorMessage = ''
 
-    const pageVO: SearchResultPageVO = this.performanceRepository.searchPerformances(
-      this.keyword,
-      this.currentCityName,
-      this.pageSize,
-      this.offset
-    )
+    try {
+      const pageVO: SearchResultPageVO = await this.performanceRepository.searchPerformances(
+        this.keyword,
+        this.pageSize,
+        this.offset
+      )
 
-    this.resultList = this.resultList.concat(pageVO.resultList)
-    this.hasMore = pageVO.hasMore
-    this.offset = this.resultList.length
-
-    this.isLoading = false
+      this.resultList = this.resultList.concat(pageVO.resultList)
+      this.hasMore = pageVO.hasMore
+      this.offset = this.resultList.length
+    } catch (error) {
+      this.errorMessage = error instanceof Error ? error.message : '加载更多失败'
+    } finally {
+      this.isLoading = false
+    }
   }
 }
