@@ -1,0 +1,11 @@
+{
+  "modelVersion": "6.1.0",
+  "description": "HarmonyOS ticketing client for performance discovery, ordering, ticket management, service cards, notifications and AI-assisted ticket search.",
+  "dependencies": {
+    "module_city_select": "file:./module_city_select"
+  },
+  "devDependencies": {
+    "@ohos/hypium": "1.0.25",
+    "@ohos/hamock": "1.0.0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "HarmonyOS ticketing client for performance discovery, ordering, ticket management, service cards, notifications and AI-assisted ticket search.",
+  "main": "",
+  "author": "XX",
+  "license": "",
+  "dependencies": {
+    "module_city_select": "file:../module_city_select"
+  }
+}

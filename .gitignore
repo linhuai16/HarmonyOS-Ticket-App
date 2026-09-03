@@ -1,0 +1,47 @@
+# Dependencies
+/node_modules/
+**/node_modules/
+
+/oh_modules/
+**/oh_modules/
+
+# Local machine configuration
+/local.properties
+
+# IDE
+/.idea/
+**/.idea/
+
+# HarmonyOS / Hvigor generated files
+/.hvigor/
+**/.hvigor/
+
+# Build outputs
+/build/
+**/build/
+
+# Native build cache
+.cxx/
+**/.cxx/
+
+# Clang
+.clangd/
+.clang-format
+.clang-tidy
+
+# Test / analyzer generated files
+**/.test/
+.appanalyzer/
+
+# HarmonyOS build artifacts
+*.hap
+*.app
+*.har
+*.hsp
+
+# Logs
+*.log
+
+# OS temporary files
+.DS_Store
+Thumbs.db

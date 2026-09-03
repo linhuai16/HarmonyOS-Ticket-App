@@ -1,0 +1,28 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/home/HomePage",
+    "pages/mine/MinePage",
+    "pages/city/CitySelectPage",
+    "pages/mine/SettingPage",
+    "pages/mine/TextPage",
+    "pages/search/SearchPage",
+    "pages/search/SearchResultPage",
+    "pages/performance/CategoryPage",
+    "pages/performance/TicketSelectPage",
+    "pages/order/SubmitOrderPage",
+    "pages/order/PaySuccessPage",
+    "pages/order/OrderListPage",
+    "pages/order/OrderDetailPage",
+    "pages/order/RefundApplyPage",
+    "pages/ticket/TicketFolderPage",
+    "pages/ticket/TicketDetailPage",
+    "pages/user/UserProfilePage",
+    "pages/user/LoginPage",
+    "pages/user/AudiencePage",
+    "pages/user/AudienceEditPage",
+    "pages/user/AddressPage",
+    "pages/user/AddressEditPage",
+    "pages/want/WantPage"
+  ]
+}

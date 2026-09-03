@@ -1,0 +1,120 @@
+import { HomePageVO, HomeCategoryVO, HomeBannerVO, HomeRecommendItemVO } from '../model/vo/home/HomePageVO'
+import { ApiClient, ApiQueryParam } from '../network/ApiClient'
+
+interface ApiHomePageVO {
+  banners?: ApiBannerItemVO[]
+  categories?: ApiCategoryItemVO[]
+  recommends?: ApiHomeRecommendItemVO[]
+  hasMore?: boolean
+  limit?: number
+  offset?: number
+}
+
+interface ApiBannerItemVO {
+  bannerId?: number
+  title?: string
+  bannerTitle?: string
+  imageUrl?: string
+  targetProjectId?: number
+  targetSessionId?: number
+  sortOrder?: number
+}
+
+interface ApiCategoryItemVO {
+  categoryId?: number
+  categoryCode?: string
+  categoryName?: string
+  iconUrl?: string
+  sortOrder?: number
+}
+
+interface ApiHomeRecommendItemVO {
+  projectId?: number
+  sessionId?: number
+  categoryId?: number
+  categoryName?: string
+  title?: string
+  posterUrl?: string
+  cityName?: string
+  venueName?: string
+  startTime?: string
+  minPrice?: number
+  maxPrice?: number
+}
+
+const DEFAULT_LIMIT: number = 20
+
+export class HomeRepository {
+  async getHomeIndex(cityName: string, limit: number = DEFAULT_LIMIT, offset: number = 0): Promise<HomePageVO> {
+    const data: ApiHomePageVO = await ApiClient.get<ApiHomePageVO>('/api/home/index', [
+      new ApiQueryParam('cityName', cityName),
+      new ApiQueryParam('limit', limit),
+      new ApiQueryParam('offset', offset)
+    ])
+
+    const recommends: ApiHomeRecommendItemVO[] = data.recommends ?? []
+
+    const realLimit: number = data.limit ?? limit
+    const realOffset: number = data.offset ?? offset
+
+    return {
+      currentCityName: cityName,
+      categories: this.buildHomeCategories(data.categories ?? []),
+      banners: this.buildHomeBanners(data.banners ?? []),
+      recommendList: this.buildRecommendList(recommends),
+      hasMore: data.hasMore ?? recommends.length >= realLimit,
+      limit: realLimit,
+      offset: realOffset
+    }
+  }
+
+  private buildHomeCategories(list: ApiCategoryItemVO[]): HomeCategoryVO[] {
+    return list.map((item: ApiCategoryItemVO): HomeCategoryVO => {
+      return {
+        categoryId: this.toId(item.categoryId),
+        categoryName: item.categoryName ?? '',
+        iconUrl: item.iconUrl
+      }
+    })
+  }
+
+  private buildHomeBanners(list: ApiBannerItemVO[]): HomeBannerVO[] {
+    return list.map((item: ApiBannerItemVO): HomeBannerVO => {
+      return {
+        bannerId: this.toId(item.bannerId),
+        imageUrl: item.imageUrl ?? '',
+        projectId: this.toId(item.targetProjectId)
+      }
+    }).filter((item: HomeBannerVO) => item.projectId.length > 0)
+  }
+
+  private buildRecommendList(list: ApiHomeRecommendItemVO[]): HomeRecommendItemVO[] {
+    return list.map((item: ApiHomeRecommendItemVO): HomeRecommendItemVO => {
+      return {
+        projectId: this.toId(item.projectId),
+        sessionId: this.toId(item.sessionId),
+        posterUrl: item.posterUrl ?? '',
+        categoryName: item.categoryName ?? '',
+        title: item.title ?? '',
+        cityName: item.cityName ?? '',
+        venueName: item.venueName ?? '',
+        startTime: this.formatDateTime(item.startTime),
+        minPrice: item.minPrice
+      }
+    })
+  }
+
+  private toId(value: number | string | undefined): string {
+    if (value === undefined) {
+      return ''
+    }
+    return String(value)
+  }
+
+  private formatDateTime(value: string | undefined): string {
+    if (value === undefined) {
+      return ''
+    }
+    return value.replace('T', ' ')
+  }
+}
