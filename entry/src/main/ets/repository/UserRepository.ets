@@ -8,7 +8,7 @@ import {
 
 import { UserDataUtil } from '../utils/UserDataUtil'
 import { UserSessionUtil } from '../utils/UserSessionUtil'
-import { ApiClient, ApiQueryParam } from '../network/ApiClient'
+import { ApiClient } from '../network/ApiClient'
 
 export interface SendSmsCodeResponse {
   success: boolean
@@ -113,6 +113,8 @@ export class UserRepository {
   }
 
   logout(): void {
+    ApiClient.post<boolean>('/api/auth/logout').catch((): void => {
+    })
     UserSessionUtil.clearLoginState()
   }
 
@@ -122,9 +124,7 @@ export class UserRepository {
       return undefined
     }
 
-    const response: BackendMinePageVO = await ApiClient.get<BackendMinePageVO>('/api/users/me', [
-      new ApiQueryParam('userId', targetUserId)
-    ])
+    const response: BackendMinePageVO = await ApiClient.get<BackendMinePageVO>('/api/users/me')
 
     const rawUser: BackendMineUserVO | undefined = response.user ?? this.mapMinePageAsUser(response)
     if (rawUser === undefined) {

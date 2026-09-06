@@ -3,7 +3,7 @@ import {
   OrderDetailItemVO
 } from '../model/vo/order/OrderDetailVO'
 
-import { PayRepository } from '../repository/PayRepository'
+import { TicketSourcePurchaseRepository } from '../repository/TicketSourcePurchaseRepository'
 import { OrderRepository } from '../repository/OrderRepository'
 import { PayMethod } from '../model/enums/PayMethod'
 import { OrderStatus } from '../model/enums/OrderStatus'
@@ -23,7 +23,7 @@ export class PaySuccessViewModel {
   isLoading: boolean = false
   errorMessage: string = ''
 
-  private payRepository: PayRepository = new PayRepository()
+  private purchaseRepository: TicketSourcePurchaseRepository = new TicketSourcePurchaseRepository()
   private orderRepository: OrderRepository = new OrderRepository()
 
   async loadPaySuccess(
@@ -50,14 +50,7 @@ export class PaySuccessViewModel {
       }
 
       if (orderDetail.orderStatus === OrderStatus.WAIT_PAY) {
-        const payResponse = await this.payRepository.mockPaySuccess(orderId, payMethod, userId)
-        if (payResponse === undefined) {
-          this.errorMessage = '支付失败，请确认订单是否超时'
-          this.orderDetailVO = orderDetail
-          this.isLoading = false
-          return
-        }
-
+        await this.purchaseRepository.payOrder(orderId, userId, payMethod)
         orderDetail = await this.orderRepository.getOrderDetail(userId, orderId)
       }
 

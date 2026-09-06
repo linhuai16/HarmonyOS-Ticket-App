@@ -239,13 +239,6 @@ export class TicketDetailViewModel {
   canSwitchPrevious(): boolean { return this.pageVO !== undefined && this.pageVO.tickets.length > 1 && this.currentIndex > 0 }
   canSwitchNext(): boolean { return this.pageVO !== undefined && this.pageVO.tickets.length > 1 && this.currentIndex < this.pageVO.tickets.length - 1 }
 
-  async mockIssueSuccess(): Promise<void> { if (this.orderId.length > 0 && await this.ticketRepository.mockIssueSuccess(this.orderId)) await this.refresh() }
-  async mockIssueFailed(): Promise<void> { if (this.orderId.length > 0 && await this.ticketRepository.mockIssueFailed(this.orderId)) await this.refresh() }
-  async mockCheckCurrentTicket(): Promise<void> {
-    const ticket: ElectronicTicketVO | undefined = this.getCurrentTicket()
-    if (ticket !== undefined && await this.ticketRepository.mockCheckTicket(ticket.ticketId)) await this.refresh()
-  }
-
   clearError(): void { this.errorMessage = '' }
 
   private clearDynamicCredential(): void {

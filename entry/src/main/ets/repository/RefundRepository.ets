@@ -16,13 +16,6 @@ export interface RefundOrderResponse {
   expectedRefundAmount: number
 }
 
-export interface MockRefundSuccessResponse {
-  success: boolean
-  refundId: string
-  refundStatus: RefundStatus
-  refundTime?: string
-}
-
 interface BackendRefundApplyPageVO {
   orderId?: number | string
   orderNo?: string
@@ -55,14 +48,6 @@ interface BackendRefundOrderResponse {
   status: string
   expectedRefundAmount: number
 }
-
-interface BackendMockRefundSuccessResponse {
-  success: boolean
-  refundId: number | string
-  refundStatus: string
-  refundTime?: string
-}
-
 
 interface BackendRefundProgress {
   refundId: number | string
@@ -174,21 +159,4 @@ export class RefundRepository {
     }
   }
 
-  async mockRefundSuccess(refundId: string): Promise<MockRefundSuccessResponse | undefined> {
-    if (refundId.length === 0) {
-      return undefined
-    }
-
-    const response: BackendMockRefundSuccessResponse =
-      await ApiClient.post<BackendMockRefundSuccessResponse>('/api/mock/refunds/' + encodeURIComponent(refundId) + '/success')
-
-    AppStorageVersionUtil.bumpRefundRelatedVersions()
-
-    return {
-      success: response.success,
-      refundId: String(response.refundId),
-      refundStatus: response.refundStatus as RefundStatus,
-      refundTime: response.refundTime
-    }
-  }
 }

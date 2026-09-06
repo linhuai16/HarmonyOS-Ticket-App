@@ -12,7 +12,6 @@ import { TicketStatus } from '../model/enums/TicketStatus'
 import { CertificateType } from '../model/enums/CertificateType'
 import { CredentialType, DynamicQrMode } from '../model/vo/ticketsource/TicketSourceTypes'
 import { ApiClient, ApiQueryParam } from '../network/ApiClient'
-import { AppStorageVersionUtil } from '../utils/AppStorageVersionUtil'
 
 const CUSTOMER_SERVICE_PHONE: string = '400-000-0000'
 
@@ -107,31 +106,6 @@ interface BackendElectronicTicketVO {
   audienceName?: string
   certificateType?: string
   maskedCertificateNo?: string
-}
-
-interface MockTicketIssueSuccessResponse {
-  success: boolean
-  orderId: number | string
-  orderStatus: string
-  issuedCount?: number
-  ticketIssuedTime?: string
-}
-
-interface MockTicketIssueFailedResponse {
-  success: boolean
-  orderId: number | string
-  orderStatus: string
-  refundId?: number | string
-  refundNo?: string
-  expiredCount?: number
-}
-
-interface MockTicketCheckResponse {
-  success: boolean
-  ticketId: number | string
-  orderId: number | string
-  ticketStatus: string
-  checkTime?: string
 }
 
 /** 票夹 / 电子票 Repository：从 SpringBoot 接口读写，不再使用 Mock。 */
@@ -231,58 +205,6 @@ export class TicketRepository {
       tickets: tickets,
       customerServicePhone: response.customerServicePhone ?? CUSTOMER_SERVICE_PHONE
     }
-  }
-
-  async mockIssueSuccess(orderId: string): Promise<boolean> {
-    if (orderId.length === 0) {
-      return false
-    }
-
-    const response: MockTicketIssueSuccessResponse =
-      await ApiClient.post<MockTicketIssueSuccessResponse>('/api/mock/orders/' + encodeURIComponent(orderId) + '/tickets/issue-success')
-
-    if (response.success) {
-      AppStorageVersionUtil.bumpOrderTicketRelatedVersions()
-    }
-
-    return response.success
-  }
-
-  async mockIssueFailed(orderId: string, reason: string = '出票接口异常，系统已发起原路退款'): Promise<boolean> {
-    if (orderId.length === 0) {
-      return false
-    }
-
-    const response: MockTicketIssueFailedResponse =
-      await ApiClient.post<MockTicketIssueFailedResponse>('/api/mock/orders/' + encodeURIComponent(orderId) + '/tickets/issue-failed?' +
-        'abnormalReason=' + encodeURIComponent(reason))
-
-    if (response.success) {
-      AppStorageVersionUtil.bumpOrderTicketRelatedVersions()
-    }
-
-    return response.success
-  }
-
-  async mockCheckTicket(ticketId: string): Promise<boolean> {
-    if (ticketId.length === 0) {
-      return false
-    }
-
-    const response: MockTicketCheckResponse =
-      await ApiClient.post<MockTicketCheckResponse>('/api/mock/tickets/' + encodeURIComponent(ticketId) + '/check')
-
-    if (response.success) {
-      AppStorageVersionUtil.bumpTicketChangedVersion()
-      AppStorageVersionUtil.bumpUserCenterChangedVersion()
-    }
-
-    return response.success
-  }
-
-  async mockExpireUnusedTickets(_orderId: string): Promise<boolean> {
-    // 后端当前没有单独的“手动过期未使用票”接口；保留方法避免调试入口报错。
-    return false
   }
 
   private toOptionalString(value: number | string | undefined | null): string | undefined {

@@ -67,7 +67,6 @@ interface BackendV13Init {
 }
 interface BackendV13TicketSubmit { clientTicketNo: string; audienceId: number }
 interface BackendV13SubmitRequest {
-  userId: number
   projectId: number
   sessionId: number
   skuId: number
@@ -91,22 +90,18 @@ interface BackendV13SubmitResult {
   userMessage?: string | null
 }
 interface BackendV13PayRequest {
-  userId: number
   payMethod: PayMethod
 }
 
 /** V1.3-B10R-5 真实购票交互数据层：页面只提交订单一次，不暴露 quoteId/provider*。 */
 export class TicketSourcePurchaseRepository {
-  async initPurchase(userId: string, projectId: string, sessionId: string, skuId: string, quantity: number): Promise<V13PurchaseInitVO> {
+  async initPurchase(_userId: string, projectId: string, sessionId: string, skuId: string, quantity: number): Promise<V13PurchaseInitVO> {
     const params: ApiQueryParam[] = [
       new ApiQueryParam('projectId', projectId),
       new ApiQueryParam('sessionId', sessionId),
       new ApiQueryParam('skuId', skuId),
       new ApiQueryParam('quantity', String(quantity))
     ]
-    if (userId.trim().length > 0) {
-      params.push(new ApiQueryParam('userId', userId.trim()))
-    }
     const raw: BackendV13Init = await ApiClient.get<BackendV13Init>('/api/ticket-source/purchase/v13/init', params)
     if (String(raw.projectId) !== projectId || String(raw.sessionId) !== sessionId || String(raw.skuId) !== skuId) {
       throw new Error('购买初始化结果与当前票档不一致')
@@ -145,7 +140,6 @@ export class TicketSourcePurchaseRepository {
   async submitOrder(request: V13SubmitOrderRequestVO): Promise<V13SubmitOrderVO> {
     TicketSourceOrderValidator.validateSubmitTickets(request.tickets, request.quantity)
     const body: BackendV13SubmitRequest = {
-      userId: Number(request.userId),
       projectId: Number(request.projectId),
       sessionId: Number(request.sessionId),
       skuId: Number(request.skuId),
@@ -167,8 +161,10 @@ export class TicketSourcePurchaseRepository {
   }
 
   async payOrder(orderId: string, userId: string, payMethod: PayMethod): Promise<V13SubmitOrderVO> {
+    if (orderId.length === 0 || userId.length === 0) {
+      throw new Error('支付参数不完整')
+    }
     const body: BackendV13PayRequest = {
-      userId: Number(userId),
       payMethod: payMethod
     }
     const raw: BackendV13SubmitResult = await ApiClient.post<BackendV13SubmitResult>(

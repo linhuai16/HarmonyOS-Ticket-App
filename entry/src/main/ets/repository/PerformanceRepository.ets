@@ -227,15 +227,14 @@ export class PerformanceRepository {
     projectId: string,
     cityName: string,
     sessionId: string | undefined = undefined,
-    userId: string | undefined = undefined
+    _userId: string | undefined = undefined
   ): Promise<PerformanceDetailVO | undefined> {
     const normalizedCityName: string = this.normalizeCityName(cityName)
     const data: ApiPerformanceDetailVO = await ApiClient.get<ApiPerformanceDetailVO>(
       '/api/performances/' + encodeURIComponent(projectId) + '/detail',
       [
         new ApiQueryParam('cityName', normalizedCityName),
-        new ApiQueryParam('sessionId', sessionId),
-        new ApiQueryParam('userId', userId)
+        new ApiQueryParam('sessionId', sessionId)
       ]
     )
 

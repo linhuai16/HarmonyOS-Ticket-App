@@ -7,7 +7,7 @@ import { PayMethod } from '../model/enums/PayMethod'
 import {
   OrderRepository
 } from '../repository/OrderRepository'
-import { PayRepository } from '../repository/PayRepository'
+import { TicketSourcePurchaseRepository } from '../repository/TicketSourcePurchaseRepository'
 import { RefundRepository } from '../repository/RefundRepository'
 import { RefundProgressVO } from '../model/vo/ticketsource/RefundProgressVO'
 import { AppStorageVersionUtil } from '../utils/AppStorageVersionUtil'
@@ -40,7 +40,7 @@ export class OrderDetailViewModel {
   refundProgressErrorMessage: string = ''
 
   private orderRepository: OrderRepository = new OrderRepository()
-  private payRepository: PayRepository = new PayRepository()
+  private purchaseRepository: TicketSourcePurchaseRepository = new TicketSourcePurchaseRepository()
   private refundRepository: RefundRepository = new RefundRepository()
 
   async loadPage(userId: string, orderId: string): Promise<void> {
@@ -109,13 +109,7 @@ export class OrderDetailViewModel {
       return false
     }
 
-    const payResponse = await this.payRepository.mockPaySuccess(this.orderId, payMethod, this.userId)
-    if (payResponse === undefined) {
-      this.errorMessage = '支付失败，请确认订单是否超时'
-      await this.reload()
-      return false
-    }
-
+    await this.purchaseRepository.payOrder(this.orderId, this.userId, payMethod)
     await this.reload()
     return true
   }
